@@ -43,6 +43,19 @@ export interface ChallengeEvidence {
   page?: CapturedPage;
 }
 
+export interface ContentEvidence {
+  kind: "repository" | "video";
+  sourceUrl: string;
+  status: AuditStatus;
+  title: string;
+  text: string;
+  reason: string;
+  textPath?: string;
+  metadataPath?: string;
+  language?: string;
+  items?: string[];
+}
+
 export interface AuditFinding {
   code: string;
   severity: "info" | "warning" | "error";
@@ -62,12 +75,16 @@ export interface TeamAudit {
   project: ProjectEvidence;
   challenge: ChallengeEvidence;
   links: LinkCheck[];
+  contentEvidence: ContentEvidence[];
   challengeCoverage: {
     status: AuditStatus;
     ratio: number | null;
     matchedTerms: string[];
     missingTerms: string[];
     explanation: string;
+    lexicalRatio?: number;
+    semanticSimilarity?: number;
+    evidenceSources?: string[];
   };
   findings: AuditFinding[];
   status: AuditStatus;
@@ -128,4 +145,5 @@ export interface AuditOptions {
   headed: boolean;
   rosterUrl?: string;
   supplementalSources?: string[];
+  extractContent: boolean;
 }

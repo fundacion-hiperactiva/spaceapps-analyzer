@@ -1,4 +1,4 @@
-import type { AuditFinding, AuditStatus, ChallengeEvidence, LinkCheck, ProjectEvidence } from "./types.js";
+import type { AuditFinding, AuditStatus, ChallengeEvidence, ContentEvidence, LinkCheck, ProjectEvidence } from "./types.js";
 
 const STOP_WORDS = new Set([
   "about", "after", "again", "also", "and", "are", "build", "challenge", "create", "data", "does", "enable", "for", "from",
@@ -6,22 +6,19 @@ const STOP_WORDS = new Set([
   "como", "con", "crear", "datos", "del", "desafio", "desde", "esta", "este", "para", "por", "que", "una", "uno", "usar",
 ]);
 
+interface EvidenceSource { label: string; text: string }
+
 export function evaluateTeam(input: {
   project: ProjectEvidence;
   challenge: ChallengeEvidence;
   links: LinkCheck[];
+  contentEvidence?: ContentEvidence[];
 }): {
   findings: AuditFinding[];
-  coverage: {
-    status: AuditStatus;
-    ratio: number | null;
-    matchedTerms: string[];
-    missingTerms: string[];
-    explanation: string;
-  };
+  coverage: ReturnType<typeof challengeCoverage>;
   status: AuditStatus;
 } {
-  const { project, challenge, links } = input;
+  const { project, challenge, links, contentEvidence = [] } = input;
   const findings: AuditFinding[] = [];
 
   requireText(findings, "PROJECT_SUBMITTED", project.submitted, "A project submission is present", "No project submission content was found");
@@ -42,56 +39,68 @@ export function evaluateTeam(input: {
     });
   }
 
-  const coverage = challengeCoverage(project, challenge);
+  const coverage = challengeCoverage(project, challenge, contentEvidence);
   if (coverage.status !== "pass") {
     findings.push({
       code: coverage.status === "unknown" ? "CHALLENGE_ALIGNMENT_UNKNOWN" : "LOW_CHALLENGE_COVERAGE",
       severity: "warning",
       status: coverage.status,
       message: coverage.explanation,
-      evidence: challenge.url ? [challenge.url] : [],
+      evidence: [challenge.url, ...contentEvidence.filter((item) => item.text).map((item) => item.sourceUrl)].filter((value): value is string => Boolean(value)),
     });
   }
 
-  const status = overallStatus(findings);
-  return { findings, coverage, status };
+  return { findings, coverage, status: overallStatus(findings) };
 }
 
-export function challengeCoverage(project: ProjectEvidence, challenge: ChallengeEvidence) {
+export function challengeCoverage(project: ProjectEvidence, challenge: ChallengeEvidence, contentEvidence: ContentEvidence[] = []) {
   const challengeText = `${challenge.title} ${challenge.excerpt}`.trim();
   if (challengeText.length < 40) {
     return {
       status: "unknown" as const,
       ratio: null,
-      matchedTerms: [],
-      missingTerms: [],
+      evidenceSources: [] as string[],
+      matchedTerms: [] as string[],
+      missingTerms: [] as string[],
       explanation: "The challenge brief could not be resolved, so alignment cannot be assessed",
     };
   }
-  const projectText = normalize(`${project.name} ${project.summary} ${project.details} ${project.nasaData}`);
-  const terms = keywords(challengeText).slice(0, 24);
-  const matchedTerms = terms.filter((term) => projectText.includes(term));
-  const missingTerms = terms.filter((term) => !projectText.includes(term));
-  const ratio = terms.length ? matchedTerms.length / terms.length : null;
-  const exactChallengeReference = project.nasaData.toLowerCase().includes(challenge.title.toLowerCase())
+
+  const sources: EvidenceSource[] = [{ label: "NASA submission", text: `${project.name} ${project.summary} ${project.details} ${project.nasaData}` }];
+  for (const item of contentEvidence) {
+    if (!item.text.trim()) continue;
+    sources.push({ label: item.kind === "repository" ? "repository" : "video transcript", text: item.text });
+  }
+
+  const terms = keywordTerms(challengeText).slice(0, 28);
+  const evidenceStems = new Set(sources.flatMap((source) => tokens(source.text).map((token) => token.stem)));
+  const matchedTerms = terms.filter((term) => evidenceStems.has(term.stem)).map((term) => term.original);
+  const missingTerms = terms.filter((term) => !evidenceStems.has(term.stem)).map((term) => term.original);
+  const lexicalRatio = terms.length ? matchedTerms.length / terms.length : 0;
+  const semanticSimilarity = Math.max(...sources.flatMap((source) => chunks(source.text).map((chunk) => cosine(challengeText, chunk))), 0);
+  const ratio = round(lexicalRatio * 0.7 + semanticSimilarity * 0.3);
+  const exactChallengeReference = normalize(project.nasaData).includes(normalize(challenge.title))
     || (challenge.url ? project.nasaData.includes(new URL(challenge.url).pathname) : false);
-  const status: AuditStatus = ratio === null
-    ? "unknown"
-    : exactChallengeReference && ratio >= 0.25
+  const status: AuditStatus = exactChallengeReference && ratio >= 0.15
+    ? "pass"
+    : ratio >= 0.28
       ? "pass"
-      : ratio >= 0.18
+      : ratio >= 0.10
         ? "warn"
         : "fail";
   return {
     status,
     ratio,
+    lexicalRatio: round(lexicalRatio),
+    semanticSimilarity: round(semanticSimilarity),
+    evidenceSources: sources.map((source) => source.label),
     matchedTerms,
     missingTerms,
     explanation: status === "pass"
-      ? "The submission cites the selected challenge and covers a meaningful subset of its specific concepts"
+      ? "The documented evidence has meaningful NLP coverage of the selected challenge concepts"
       : status === "warn"
-        ? "Some challenge concepts are present, but the documented evidence is incomplete or the challenge is not cited explicitly"
-        : "The documented project has low lexical coverage of the challenge brief; manual semantic review is required",
+        ? "Some challenge concepts are supported by the documented evidence, but coverage remains incomplete"
+        : "The combined submission, repository, and transcript evidence has low documented NLP coverage of the challenge; manual review is required",
   };
 }
 
@@ -102,24 +111,71 @@ export function overallStatus(findings: AuditFinding[]): AuditStatus {
 }
 
 function requireText(findings: AuditFinding[], code: string, condition: boolean, passMessage: string, failMessage: string): void {
-  findings.push({
-    code,
-    severity: condition ? "info" : "error",
-    status: condition ? "pass" : "fail",
-    message: condition ? passMessage : failMessage,
-    evidence: [],
+  findings.push({ code, severity: condition ? "info" : "error", status: condition ? "pass" : "fail", message: condition ? passMessage : failMessage, evidence: [] });
+}
+
+function keywordTerms(text: string): Array<{ original: string; stem: string; count: number }> {
+  const values = new Map<string, { original: string; stem: string; count: number }>();
+  for (const token of tokens(text)) {
+    const current = values.get(token.stem);
+    if (current) current.count += 1;
+    else values.set(token.stem, { ...token, count: 1 });
+  }
+  return [...values.values()].sort((a, b) => b.count - a.count || b.original.length - a.original.length);
+}
+
+function tokens(text: string): Array<{ original: string; stem: string }> {
+  return normalize(text).split(/\s+/).filter(Boolean).flatMap((original) => {
+    if (original.length < 4 || STOP_WORDS.has(original)) return [];
+    const value = stem(original);
+    return value.length >= 3 && !STOP_WORDS.has(value) ? [{ original, stem: value }] : [];
   });
 }
 
-function keywords(text: string): string[] {
-  const counts = new Map<string, number>();
-  for (const token of normalize(text).split(/\s+/)) {
-    if (token.length < 4 || STOP_WORDS.has(token)) continue;
-    counts.set(token, (counts.get(token) ?? 0) + 1);
+function stem(value: string): string {
+  let result = value;
+  for (const suffix of ["amientos", "imiento", "aciones", "adores", "adoras", "acion", "mente", "idades", "idad", "iendo", "ando", "ments", "ation", "ingly", "edly", "ing", "ies", "ed", "es", "os", "as", "s"]) {
+    if (result.length - suffix.length >= 4 && result.endsWith(suffix)) {
+      result = result.slice(0, -suffix.length);
+      break;
+    }
   }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length).map(([term]) => term);
+  return result;
+}
+
+function chunks(text: string): string[] {
+  const paragraphs = text.split(/\n{2,}|(?<=[.!?])\s+/).map((value) => value.trim()).filter(Boolean);
+  const result: string[] = [];
+  let current = "";
+  for (const paragraph of paragraphs) {
+    if (current && current.length + paragraph.length > 1_500) {
+      result.push(current);
+      current = "";
+    }
+    current += `${current ? " " : ""}${paragraph.slice(0, 1_500)}`;
+  }
+  if (current) result.push(current);
+  return result.length ? result.slice(0, 400) : [text.slice(0, 1_500)];
+}
+
+function cosine(left: string, right: string): number {
+  const a = frequencies(left);
+  const b = frequencies(right);
+  let dot = 0;
+  for (const [term, count] of a) dot += count * (b.get(term) ?? 0);
+  const normA = Math.sqrt([...a.values()].reduce((sum, value) => sum + value * value, 0));
+  const normB = Math.sqrt([...b.values()].reduce((sum, value) => sum + value * value, 0));
+  return normA && normB ? dot / (normA * normB) : 0;
+}
+
+function frequencies(text: string): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const token of tokens(text)) result.set(token.stem, (result.get(token.stem) ?? 0) + 1);
+  return result;
 }
 
 function normalize(text: string): string {
-  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  return text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
+
+function round(value: number): number { return Math.round(value * 10_000) / 10_000; }

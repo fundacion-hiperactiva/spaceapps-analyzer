@@ -29,6 +29,7 @@ program
   .option("--roster-url <url>", "public organizer roster with completion/withdrawal statuses")
   .option("--supplemental-source <url>", "additional public organizer source (repeatable)", collectValue, [])
   .option("--no-external-checks", "skip public-access checks for project links")
+  .option("--no-content-extraction", "skip public repository and video transcript extraction")
   .option("--no-pdf", "skip PDF rendering")
   .option("--headed", "show the Chromium browser", false)
   .addOption(new Option("--fail-on <level>", "exit non-zero at this result level").choices(["never", "fail", "warn"]).default("never"))
@@ -39,6 +40,7 @@ program
       timeoutMs: Number(flags.timeout),
       concurrency: Number(flags.concurrency),
       checkExternalLinks: flags.externalChecks !== false,
+      extractContent: flags.contentExtraction !== false,
       headed: flags.headed === true,
     };
     if (flags.maxTeams !== undefined) options.maxTeams = Number(flags.maxTeams);

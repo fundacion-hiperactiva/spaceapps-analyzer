@@ -179,18 +179,26 @@ export async function checkPublicLink(
       || LOGIN_PATTERNS.some((pattern) => pattern.test(`${title}\n${text.slice(0, 5_000)}`));
     const botProtection = httpStatus === 403
       && BOT_PROTECTION_PATTERNS.some((pattern) => pattern.test(`${title}\n${text.slice(0, 5_000)}`));
+    const temporaryService = httpStatus !== null && httpStatus >= 500
+      && /service waking up|application loading|allocating compute resources|starting the instance|almost live/i.test(text);
+    const publicVideoPage = httpStatus !== null && httpStatus < 400
+      && /(?:youtube\.com\/watch|youtu\.be\/)/i.test(`${finalUrl}\n${inputUrl}`);
     const badStatus = httpStatus !== null && httpStatus >= 400;
     const empty = text.length < 30 && !/\.pdf(?:$|\?)/i.test(finalUrl);
-    const status = botProtection ? "warn" : badStatus || loginWall ? "fail" : empty ? "warn" : "pass";
+    const status = botProtection || temporaryService ? "warn" : badStatus || loginWall ? "fail" : empty && !publicVideoPage ? "warn" : "pass";
     const reason = botProtection
       ? `HTTP ${httpStatus}: the automated browser encountered an anti-bot interstitial; manual verification is required`
+      : temporaryService
+        ? `HTTP ${httpStatus}: the public hosting service is waking up; retry after startup completes`
       : badStatus
       ? `HTTP ${httpStatus}`
       : loginWall
         ? "The destination requires authentication or access approval"
-        : empty
+        : empty && !publicVideoPage
           ? "The page loaded but exposed too little public text to confirm its contents"
-          : "The destination loaded in a fresh browser context without an authentication wall";
+          : publicVideoPage
+            ? "The public video page loaded in a fresh browser context"
+            : "The destination loaded in a fresh browser context without an authentication wall";
     return {
       label,
       url: inputUrl,

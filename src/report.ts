@@ -60,6 +60,7 @@ function renderTeam(team: TeamAudit, locale: Locale): string {
   }).join("\n");
   const evidence = Object.entries(team.pages).map(([name, page]) => `- ${localizedEvidenceName(locale, name)}: [${tr(locale, "screenshot")}](./${page.screenshotPath}) · [${tr(locale, "text")}](./${page.textPath}) · [HTML](./${page.htmlPath})`).join("\n");
   const challengeEvidence = team.challenge.page ? `\n- ${tr(locale, "challenge").toLowerCase()}: [${tr(locale, "screenshot")}](./${team.challenge.page.screenshotPath}) · [${tr(locale, "text")}](./${team.challenge.page.textPath}) · [HTML](./${team.challenge.page.htmlPath})` : "";
+  const content = (team.contentEvidence ?? []).map((item) => `| ${item.kind === "repository" ? tr(locale, "repository") : tr(locale, "videoTranscript")} | ${statusIcon(item.status)} ${statusLabel(locale, item.status)} | ${link(item.sourceUrl, tr(locale, "source"))} | ${escapeCell(translateContentReason(locale, item.reason))} | ${item.items?.length ?? item.language ?? "-"} | ${item.textPath ? link(`./${item.textPath}`, tr(locale, "text")) : "-"} |`).join("\n");
 
   return `### ${team.name}
 
@@ -80,9 +81,19 @@ ${team.findings.filter((finding) => ["PROJECT_SUBMITTED", "PROJECT_SUMMARY", "PR
 | --- | --- | ---: | --- | --- | --- |
 ${links || `| - | ${tr(locale, "unknown")} | - | - | ${tr(locale, "noExternal")} | - |`}
 
+#### ${tr(locale, "extractedContent")}
+
+| ${tr(locale, "contentType")} | ${tr(locale, "result")} | URL | ${tr(locale, "reason")} | ${tr(locale, "filesAnalyzed")} / ${tr(locale, "language")} | ${tr(locale, "evidence")} |
+| --- | --- | --- | --- | --- | --- |
+${content || `| - | ${tr(locale, "unknown")} | - | - | - | - |`}
+
 #### ${tr(locale, "challengeCoverage")}
 
-- ${tr(locale, "signal")}: **${statusLabel(locale, team.challengeCoverage.status)}**${team.challengeCoverage.ratio === null ? "" : ` (${Math.round(team.challengeCoverage.ratio * 100)}%)`}
+- ${tr(locale, "signal")}: **${statusLabel(locale, team.challengeCoverage.status)}**
+- ${tr(locale, "combinedScore")}: ${percentage(team.challengeCoverage.ratio)}
+- ${tr(locale, "conceptCoverage")}: ${percentage(team.challengeCoverage.lexicalRatio)}
+- ${tr(locale, "semanticSimilarity")}: ${percentage(team.challengeCoverage.semanticSimilarity)}
+- ${tr(locale, "evidenceSources")}: ${(team.challengeCoverage.evidenceSources ?? []).map((value) => localizedSource(locale, value)).join(", ") || tr(locale, "none")}
 - ${tr(locale, "matchedTerms")}: ${team.challengeCoverage.matchedTerms.join(", ") || tr(locale, "none")}
 - ${tr(locale, "missingTerms")}: ${team.challengeCoverage.missingTerms.join(", ") || tr(locale, "none")}
 - ${tr(locale, "interpretation")}: ${coverageExplanation(locale, team.challengeCoverage.status)}
@@ -104,3 +115,14 @@ function statusIcon(status: string): string { return status === "pass" ? "✅" :
 function rosterStatus(locale: Locale, status: string): string { return status === "completed" ? tr(locale, "completedTeams") : status === "no_show" ? tr(locale, "noShow") : status === "abandoned" ? tr(locale, "abandoned") : tr(locale, "unknown"); }
 function escapeCell(value: unknown): string { return String(value ?? "").replace(/\|/g, "\\|").replace(/\n/g, " "); }
 function link(url: string, label: string): string { return `[${label.replace(/]/g, "\\]")}](${url.replace(/\)/g, "%29")})`; }
+function percentage(value: number | null | undefined): string { return value === null || value === undefined ? "-" : `${Math.round(value * 100)}%`; }
+function localizedSource(locale: Locale, value: string): string { if (locale === "en") return value; return value === "NASA submission" ? "entrega de NASA" : value === "repository" ? "repositorio" : value === "video transcript" ? "transcripción del video" : value; }
+function translateContentReason(locale: Locale, value: string): string {
+  if (locale === "en") return value;
+  return value
+    .replace(/Extracted (\d+) public text files without executing repository code/i, "Se extrajeron $1 archivos de texto públicos sin ejecutar el código del repositorio")
+    .replace(/No readable public repository content was extracted/i, "No se pudo extraer contenido público legible del repositorio")
+    .replace(/No public caption track was exposed by the video/i, "El video no expuso una pista pública de subtítulos")
+    .replace(/The public caption track contained no readable transcript/i, "La pista pública de subtítulos no contenía una transcripción legible")
+    .replace(/Extracted public ([^ ]+) captions/i, "Se extrajeron subtítulos públicos en $1");
+}

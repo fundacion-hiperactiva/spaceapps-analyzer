@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { challengeCoverage, evaluateTeam } from "../src/analyze.js";
-import type { ChallengeEvidence, ProjectEvidence } from "../src/types.js";
+import type { ChallengeEvidence, ContentEvidence, ProjectEvidence } from "../src/types.js";
 
 const challenge: ChallengeEvidence = {
   title: "Create Health Monitoring Software for Astronauts on Space Missions",
@@ -30,6 +30,19 @@ describe("challengeCoverage", () => {
     const result = challengeCoverage(project, { ...challenge, excerpt: "", title: "Short" });
     expect(result.status).toBe("unknown");
     expect(result.ratio).toBeNull();
+  });
+
+  it("uses repository and transcript evidence to improve sparse form coverage", () => {
+    const sparse = { ...project, summary: "A compact astronaut assistant.", details: "See the public implementation and narrated demonstration.", nasaData: "NASA health challenge" };
+    const baseline = challengeCoverage(sparse, challenge);
+    const evidence: ContentEvidence[] = [{
+      kind: "repository", sourceUrl: "https://github.com/example/health", status: "pass", title: "example/health", reason: "extracted", text:
+        "The software gathers astronaut sleep, circadian rhythm, alertness and light exposure indicators. It evaluates health during long duration missions and recommends actions.",
+    }];
+    const enriched = challengeCoverage(sparse, challenge, evidence);
+    expect(enriched.ratio).toBeGreaterThan(baseline.ratio ?? 0);
+    expect(enriched.evidenceSources).toContain("repository");
+    expect(enriched.status).not.toBe("fail");
   });
 });
 

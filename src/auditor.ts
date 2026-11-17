@@ -3,11 +3,12 @@ import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { evaluateTeam } from "./analyze.js";
 import { captureCurrentPage, capturePage, captureTab, checkPublicLink, settle } from "./capture.js";
+import { collectExternalContent } from "./content.js";
 import { eventIdentity, eventTeamListings, extractChallengeLink, extractMembers, extractProject, extractRoster, visibleTabPanelText, type TeamListing } from "./extract.js";
 import type { AuditOptions, CapturedPage, ChallengeEvidence, EventAudit, LinkCheck, RosterEvidence, TeamAudit } from "./types.js";
 import { cleanText, extractYearAndSlug, mapLimit, slugify, validatePublicHttpUrl } from "./utils.js";
 
-export const TOOL_VERSION = "0.1.0";
+export const TOOL_VERSION = "0.2.0";
 
 export async function auditEvent(inputUrl: string, options: AuditOptions): Promise<EventAudit> {
   const sourceUrl = validatePublicHttpUrl(inputUrl);
@@ -75,6 +76,7 @@ export async function auditEvent(inputUrl: string, options: AuditOptions): Promi
       context,
       linkContext,
       checkExternalLinks: options.checkExternalLinks,
+      extractContent: options.extractContent,
     }));
 
     await Promise.all([eventPage.close(), context.close(), linkContext.close()]);
@@ -101,7 +103,8 @@ export async function auditEvent(inputUrl: string, options: AuditOptions): Promi
       limitations: [
         "Automated checks observe public web behavior at capture time; later availability can change.",
         "Authentication-wall detection uses status codes, redirects, and visible text patterns and can produce false positives or negatives.",
-        "Challenge coverage is a reproducible lexical signal. A human judge must decide true scientific and functional compliance.",
+        "Challenge coverage is an explainable NLP signal combining normalized concept coverage and semantic similarity. A human judge must decide true scientific and functional compliance.",
+        "Repository text is downloaded for analysis but code is never executed. Video evidence depends on captions being publicly exposed by the video provider.",
         "The CLI does not execute downloaded code, grant permissions, submit forms, or bypass access controls.",
       ],
     };
@@ -123,8 +126,9 @@ async function auditTeam(input: {
   context: BrowserContext;
   linkContext: BrowserContext;
   checkExternalLinks: boolean;
+  extractContent: boolean;
 }): Promise<TeamAudit> {
-  const { listing, year, outputDir, timeoutMs, context, linkContext, checkExternalLinks } = input;
+  const { listing, year, outputDir, timeoutMs, context, linkContext, checkExternalLinks, extractContent } = input;
   const teamSlug = new URL(listing.url).pathname.split("/").filter(Boolean).at(-1) || slugify(listing.name);
   const base = `teams/${teamSlug}`;
   const page = await context.newPage();
@@ -155,6 +159,7 @@ async function auditTeam(input: {
       page,
       title: challengeLink.title || listing.challenge,
       url: challengeLink.url,
+      fallbackExcerpt: challengeExcerptFromAbout(about),
       outputDir,
       relativeBase: `${base}/challenge`,
       timeoutMs,
@@ -171,7 +176,10 @@ async function auditTeam(input: {
       }
     }
 
-    const result = evaluateTeam({ project, challenge, links });
+    const contentEvidence = extractContent
+      ? await collectExternalContent({ context: linkContext, projectUrl: project.projectUrl, demoUrl: project.demoUrl, outputRoot: outputDir, relativeDir: `${base}/content`, timeoutMs })
+      : [];
+    const result = evaluateTeam({ project, challenge, links, contentEvidence });
     return {
       name: listing.name,
       slug: teamSlug,
@@ -183,6 +191,7 @@ async function auditTeam(input: {
       project,
       challenge,
       links,
+      contentEvidence,
       challengeCoverage: result.coverage,
       findings: result.findings,
       status: result.status,
@@ -199,11 +208,9 @@ async function captureTeamTab(page: Page, name: string, outputRoot: string, rela
   const tab = page.getByRole("tab", { name: new RegExp(`^${name}$`, "i") });
   if (!(await tab.count())) return null;
   await tab.first().click();
-  await page.locator('[role="tab"][aria-selected="true"]')
-    .filter({ hasText: new RegExp(`^${name}$`, "i") })
-    .waitFor({ state: "visible", timeout: 5_000 });
   const controls = await tab.first().getAttribute("aria-controls");
-  if (controls) await page.locator(`#${controls}`).waitFor({ state: "visible", timeout: 5_000 });
+  if (controls) await page.locator(`#${controls}`).waitFor({ state: "visible", timeout: 10_000 });
+  else await settle(page, 10_000).catch(() => undefined);
   return captureCurrentPage(page, outputRoot, relativeBase, null);
 }
 
@@ -211,19 +218,29 @@ async function captureChallenge(input: {
   page: Page;
   title: string;
   url: string | null;
+  fallbackExcerpt: string;
   outputDir: string;
   relativeBase: string;
   timeoutMs: number;
 }): Promise<ChallengeEvidence> {
-  if (!input.url) return { title: input.title, url: null, excerpt: "" };
+  if (!input.url) return { title: input.title, url: null, excerpt: input.fallbackExcerpt };
   const challengePage = await input.page.context().newPage();
   try {
     const captured = await capturePage(challengePage, input.url, input.outputDir, input.relativeBase, input.timeoutMs);
+    const panelText = await visibleTabPanelText(challengePage).catch(() => "");
     const mainText = cleanText(await challengePage.locator("main").innerText().catch(() => captured.text));
-    return { title: input.title || await primaryHeading(challengePage), url: input.url, excerpt: mainText, page: captured };
+    const candidate = panelText.length >= 120 ? panelText : mainText;
+    const missingPage = /page not found|couldn'?t find what you were looking for|no results found/i.test(candidate);
+    const excerpt = missingPage && input.fallbackExcerpt.length >= 120 ? input.fallbackExcerpt : candidate;
+    return { title: input.title || await primaryHeading(challengePage), url: input.url, excerpt, page: captured };
   } finally {
     await challengePage.close();
   }
+}
+
+function challengeExcerptFromAbout(value: string): string {
+  const match = value.match(/ABOUT THE CHALLENGE\s+([\s\S]*?)(?:\s+Team Information|\s+Local Event|$)/i);
+  return cleanText(match?.[1] ?? "");
 }
 
 async function primaryHeading(page: Page): Promise<string> {
@@ -251,6 +268,7 @@ function failedTeam(listing: TeamListing, slug: string, pages: Record<string, Ca
     project: { name: "", summary: "", details: "", nasaData: "", demoUrl: null, projectUrl: null, submitted: false },
     challenge: { title: listing.challenge, url: null, excerpt: "" },
     links: [],
+    contentEvidence: [],
     challengeCoverage: { status: "unknown", ratio: null, matchedTerms: [], missingTerms: [], explanation: "Team crawl failed" },
     findings: [{ code: "TEAM_CRAWL_FAILED", severity: "error", status: "fail", message: error, evidence: [listing.url] }],
     status: "fail",
