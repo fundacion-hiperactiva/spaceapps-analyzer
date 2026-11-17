@@ -1,0 +1,46 @@
+{
+  "name": "spaceapps-analyzer",
+  "version": "0.1.0",
+  "description": "Evidence-first CLI auditor for NASA Space Apps Challenge local events",
+  "type": "module",
+  "bin": {
+    "spaceapps-analyzer": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "prepublishOnly": "pnpm check"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "nasa",
+    "space-apps",
+    "audit",
+    "playwright",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^14.0.2",
+    "playwright": "^1.57.0",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  },
+  "packageManager": "pnpm@12.9.1"
+}
