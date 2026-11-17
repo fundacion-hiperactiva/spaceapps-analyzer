@@ -44,6 +44,14 @@ export function statusLabel(locale: Locale, status: AuditStatus): string {
 export function findingMessage(locale: Locale, finding: AuditFinding): string {
   if (locale === "en") return finding.message;
   const ok = finding.status === "pass";
+  if (finding.code === "PROJECT_LANGUAGE" && finding.status === "fail") {
+    const fields = finding.message.split(":").slice(1).join(":").trim()
+      .replace(/summary/gi, "resumen")
+      .replace(/project details/gi, "detalles del proyecto")
+      .replace(/NASA data/gi, "datos de NASA");
+    return `La guía oficial exige inglés; se detectó contenido en español en: ${fields || "campos sustantivos"}`;
+  }
+  if (finding.code === "PROJECT_LANGUAGE" && finding.status !== "pass") return "No se pudo confirmar con suficiente confianza el idioma de la página del proyecto; se requiere revisión manual";
   const map: Record<string, [string, string]> = {
     PROJECT_SUBMITTED: ["Hay una entrega de proyecto", "No se encontró contenido de una entrega de proyecto"],
     PROJECT_SUMMARY: ["El proyecto incluye un resumen sustantivo", "El resumen del proyecto falta o es demasiado breve"],
@@ -51,6 +59,7 @@ export function findingMessage(locale: Locale, finding: AuditFinding): string {
     DEMO_LINK: ["Se documentó un enlace de demostración", "El proyecto no tiene un enlace de demostración"],
     PROJECT_LINK: ["Se documentó un enlace al proyecto o prototipo", "El proyecto no tiene un enlace al proyecto o prototipo"],
     NASA_DATA: ["Se documentaron datos o referencias de NASA", "Los datos o referencias de NASA faltan o son demasiado breves"],
+    PROJECT_LANGUAGE: ["Los campos sustantivos de la entrega están escritos en inglés", "La guía oficial exige inglés; se detectó contenido en español o no se pudo confirmar el idioma"],
     CHALLENGE_ALIGNMENT_UNKNOWN: ["Se pudo evaluar la alineación con el desafío", "No hay evidencia pública suficiente para evaluar la alineación con el desafío"],
     LOW_CHALLENGE_COVERAGE: ["La cobertura automatizada del desafío es suficiente", "La cobertura automatizada del desafío es baja o incompleta; se requiere revisión manual"],
   };
@@ -69,6 +78,7 @@ export function findingLabel(locale: Locale, code: string): string {
     DEMO_LINK: ["Demonstration link", "Enlace de demostración"],
     PROJECT_LINK: ["Project link", "Enlace del proyecto"],
     NASA_DATA: ["NASA data", "Datos de NASA"],
+    PROJECT_LANGUAGE: ["English-language submission", "Entrega en idioma inglés"],
     PUBLIC_LINK_INACCESSIBLE: ["Public link inaccessible", "Enlace público inaccesible"],
     PUBLIC_LINK_UNCONFIRMED: ["Public link unconfirmed", "Enlace público sin confirmar"],
     LOW_CHALLENGE_COVERAGE: ["Low challenge coverage", "Cobertura baja del desafío"],
@@ -88,6 +98,7 @@ export function linkLabel(locale: Locale, label: string): string {
 export function translateReason(locale: Locale, reason: string): string {
   if (locale === "en") return reason;
   if (/anti-bot interstitial/i.test(reason)) return reason.replace("the automated browser encountered an anti-bot interstitial; manual verification is required", "el navegador automatizado encontró una barrera anti-bot; se requiere verificación manual");
+  if (/public provider rate-limited/i.test(reason)) return "HTTP 429: el proveedor público limitó temporalmente al navegador automatizado; se requiere verificación manual";
   if (/public hosting service is waking up/i.test(reason)) return reason.replace("the public hosting service is waking up; retry after startup completes", "el servicio público de hosting se está iniciando; vuelva a intentar cuando finalice");
   if (/public video page loaded/i.test(reason)) return "La página pública del video cargó en un contexto de navegador nuevo";
   if (/Navigation did not complete, but public content rendered/i.test(reason)) return reason.replace("Navigation did not complete, but public content rendered", "La navegación no finalizó, pero se mostró contenido público");
@@ -124,6 +135,7 @@ export function translatedLimitations(locale: Locale, limitations: string[]): st
     "La detección de barreras de autenticación usa códigos de estado, redirecciones y patrones de texto visible, y puede producir falsos positivos o negativos.",
     "La cobertura del desafío es una señal NLP explicable que combina conceptos normalizados y similitud semántica. Una persona debe determinar el cumplimiento científico y funcional real.",
     "El texto del repositorio se descarga para analizarlo, pero el código nunca se ejecuta. La evidencia de video depende de que el proveedor publique subtítulos.",
+    "El idioma de la página del proyecto se estima mediante palabras funcionales en inglés y español. El idioma de diapositivas enlazadas y del audio del video requiere revisión manual cuando no hay transcripción pública.",
     "El CLI no ejecuta código descargado, concede permisos, envía formularios ni evade controles de acceso.",
   ];
   return limitations.map((_, index) => translated[index] ?? limitations[index] ?? "");

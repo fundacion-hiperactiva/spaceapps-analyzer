@@ -26,7 +26,7 @@ export function renderHtml(audit: EventAudit, locale: Locale): string {
 }
 
 function renderTeam(team: TeamAudit, locale: Locale): string {
-  const completeness = team.findings.filter((finding) => ["PROJECT_SUBMITTED", "PROJECT_SUMMARY", "PROJECT_DETAILS", "DEMO_LINK", "PROJECT_LINK", "NASA_DATA"].includes(finding.code));
+  const completeness = team.findings.filter((finding) => ["PROJECT_SUBMITTED", "PROJECT_SUMMARY", "PROJECT_DETAILS", "DEMO_LINK", "PROJECT_LINK", "NASA_DATA", "PROJECT_LANGUAGE"].includes(finding.code));
   const discrepancies = team.findings.filter((finding) => finding.status !== "pass");
   const pageEvidence = Object.entries(team.pages).map(([name, page]) => `<li><strong>${escapeHtml(evidenceName(locale, name))}</strong><span><a href="${escapeAttr(page.screenshotPath)}">${escapeHtml(tr(locale, "screenshot"))}</a> · <a href="${escapeAttr(page.textPath)}">${escapeHtml(tr(locale, "text"))}</a> · <a href="${escapeAttr(page.htmlPath)}">HTML</a></span></li>`).join("");
   const challengeEvidence = team.challenge.page ? `<li><strong>${escapeHtml(tr(locale, "challenge").toLowerCase())}</strong><span><a href="${escapeAttr(team.challenge.page.screenshotPath)}">${escapeHtml(tr(locale, "screenshot"))}</a> · <a href="${escapeAttr(team.challenge.page.textPath)}">${escapeHtml(tr(locale, "text"))}</a> · <a href="${escapeAttr(team.challenge.page.htmlPath)}">HTML</a></span></li>` : "";

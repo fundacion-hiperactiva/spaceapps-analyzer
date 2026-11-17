@@ -76,6 +76,13 @@ export interface TeamAudit {
   challenge: ChallengeEvidence;
   links: LinkCheck[];
   contentEvidence: ContentEvidence[];
+  projectLanguage: {
+    status: AuditStatus;
+    detected: "english" | "spanish" | "mixed" | "unknown";
+    englishRatio: number | null;
+    nonEnglishFields: string[];
+    explanation: string;
+  };
   challengeCoverage: {
     status: AuditStatus;
     ratio: number | null;

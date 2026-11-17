@@ -8,7 +8,7 @@ import { eventIdentity, eventTeamListings, extractChallengeLink, extractMembers,
 import type { AuditOptions, CapturedPage, ChallengeEvidence, EventAudit, LinkCheck, RosterEvidence, TeamAudit } from "./types.js";
 import { cleanText, extractYearAndSlug, mapLimit, slugify, validatePublicHttpUrl } from "./utils.js";
 
-export const TOOL_VERSION = "0.2.0";
+export const TOOL_VERSION = "0.3.0";
 
 export async function auditEvent(inputUrl: string, options: AuditOptions): Promise<EventAudit> {
   const sourceUrl = validatePublicHttpUrl(inputUrl);
@@ -105,6 +105,7 @@ export async function auditEvent(inputUrl: string, options: AuditOptions): Promi
         "Authentication-wall detection uses status codes, redirects, and visible text patterns and can produce false positives or negatives.",
         "Challenge coverage is an explainable NLP signal combining normalized concept coverage and semantic similarity. A human judge must decide true scientific and functional compliance.",
         "Repository text is downloaded for analysis but code is never executed. Video evidence depends on captions being publicly exposed by the video provider.",
+        "Project-page language is estimated from English and Spanish function words. Linked slide language and spoken video language require manual review when no public transcript is available.",
         "The CLI does not execute downloaded code, grant permissions, submit forms, or bypass access controls.",
       ],
     };
@@ -192,6 +193,7 @@ async function auditTeam(input: {
       challenge,
       links,
       contentEvidence,
+      projectLanguage: result.language,
       challengeCoverage: result.coverage,
       findings: result.findings,
       status: result.status,
@@ -269,6 +271,7 @@ function failedTeam(listing: TeamListing, slug: string, pages: Record<string, Ca
     challenge: { title: listing.challenge, url: null, excerpt: "" },
     links: [],
     contentEvidence: [],
+    projectLanguage: { status: "unknown", detected: "unknown", englishRatio: null, nonEnglishFields: [], explanation: "Team crawl failed" },
     challengeCoverage: { status: "unknown", ratio: null, matchedTerms: [], missingTerms: [], explanation: "Team crawl failed" },
     findings: [{ code: "TEAM_CRAWL_FAILED", severity: "error", status: "fail", message: error, evidence: [listing.url] }],
     status: "fail",

@@ -9,6 +9,7 @@ The tool never logs in, submits forms, bypasses access controls, executes partic
 - Node.js 22+
 - pnpm 10+
 - Chromium for Playwright
+- Optional: `yt-dlp` for a second attempt at public YouTube subtitle extraction
 
 ## Install
 
@@ -18,6 +19,8 @@ pnpm exec playwright install chromium
 pnpm build
 pnpm link --global
 ```
+
+If `yt-dlp` is not on `PATH`, set `SPACEAPPS_YT_DLP` to its executable path. The analyzer downloads subtitle tracks only; it does not retain complete participant videos.
 
 For local development, `pnpm dev -- ...` avoids the global link.
 
@@ -95,6 +98,7 @@ For each team:
 7. Public repository source and documentation are collected as text without executing code.
 8. Public YouTube captions are collected when the provider exposes them.
 9. The NASA form, repository, and transcript evidence cover concepts from the public challenge brief.
+10. Substantive project-page fields are checked for the official English-language submission requirement; ambiguous cases and linked media without public transcripts require manual review.
 
 Results use four states:
 

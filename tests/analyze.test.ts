@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { challengeCoverage, evaluateTeam } from "../src/analyze.js";
+import { challengeCoverage, evaluateTeam, projectLanguage } from "../src/analyze.js";
 import type { ChallengeEvidence, ContentEvidence, ProjectEvidence } from "../src/types.js";
 
 const challenge: ChallengeEvidence = {
@@ -44,6 +44,25 @@ describe("challengeCoverage", () => {
     expect(enriched.evidenceSources).toContain("repository");
     expect(enriched.status).not.toBe("fail");
   });
+
+  it("normalizes bilingual and synonymous domain concepts", () => {
+    const trainerChallenge: ChallengeEvidence = {
+      title: "Build a Junior Astronaut Mission Trainer",
+      url: null,
+      excerpt: "Create an interactive mission trainer where an astronaut balances radiation shielding, oxygen, food, energy, and other resources in a Martian outpost.",
+    };
+    const spanishProject: ProjectEvidence = {
+      ...project,
+      name: "Misión Marte",
+      summary: "Un juego inmersivo y simulador de vida humana en Marte.",
+      details: "Los jugadores administran oxígeno, alimentos, energía y otros recursos mientras protegen el hábitat de la radiación.",
+      nasaData: "Datos y referencias sobre Marte",
+    };
+    const result = challengeCoverage(spanishProject, trainerChallenge);
+    expect(result.status).not.toBe("fail");
+    expect(result.matchedTerms).toContain("trainer");
+    expect(result.matchedTerms).toContain("martian");
+  });
 });
 
 describe("evaluateTeam", () => {
@@ -56,5 +75,20 @@ describe("evaluateTeam", () => {
     expect(result.findings.find((finding) => finding.code === "DEMO_LINK")?.status).toBe("fail");
     expect(result.findings.find((finding) => finding.code === "NASA_DATA")?.status).toBe("fail");
     expect(result.status).toBe("fail");
+  });
+});
+
+describe("projectLanguage", () => {
+  it("passes substantive English submission fields", () => {
+    expect(projectLanguage(project).status).toBe("pass");
+  });
+
+  it("fails when a substantive field is written in Spanish", () => {
+    const result = projectLanguage({
+      ...project,
+      summary: "Nuestro proyecto ayuda a los astronautas durante las misiones espaciales y permite cuidar su salud.",
+    });
+    expect(result.status).toBe("fail");
+    expect(result.nonEnglishFields).toContain("summary");
   });
 });

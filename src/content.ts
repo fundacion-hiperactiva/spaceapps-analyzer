@@ -1,4 +1,7 @@
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { mkdir, readdir, readFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import type { BrowserContext } from "playwright";
 import { settle } from "./capture.js";
 import type { ContentEvidence } from "./types.js";
@@ -13,6 +16,7 @@ const TEXT_EXTENSIONS = new Set([
 const MAX_FILES = 60;
 const MAX_FILE_CHARS = 80_000;
 const MAX_TOTAL_CHARS = 200_000;
+const execFileAsync = promisify(execFile);
 
 export async function collectExternalContent(input: {
   context: BrowserContext;
@@ -24,7 +28,7 @@ export async function collectExternalContent(input: {
 }): Promise<ContentEvidence[]> {
   const evidence: ContentEvidence[] = [];
   const urls = [...new Set([input.projectUrl, input.demoUrl].filter((value): value is string => Boolean(value)))];
-  const repositoryUrl = urls.find(isRepositoryUrl);
+  const repositoryUrl = urls.map(toRepositoryUrl).find((value): value is string => Boolean(value));
   const videoUrl = urls.find((value) => youtubeId(value));
   if (repositoryUrl) evidence.push(await collectRepository(repositoryUrl, input.outputRoot, input.relativeDir, input.timeoutMs));
   if (videoUrl) evidence.push(await collectYouTubeTranscript(input.context, videoUrl, input.outputRoot, input.relativeDir, input.timeoutMs));
@@ -147,6 +151,8 @@ async function collectYouTubeTranscript(context: BrowserContext, url: string, ou
     if (!track?.baseUrl) {
       const uiText = await extractTranscriptFromUi(page);
       if (uiText) return saveTranscript({ url, title, text: uiText, language: undefined, outputRoot, relativeDir, reason: "Extracted the public transcript rendered by the video page" });
+      const downloaded = await extractTranscriptWithYtDlp(url, outputRoot, relativeDir, timeoutMs);
+      if (downloaded) return saveTranscript({ url, title, text: downloaded.text, language: downloaded.language, outputRoot, relativeDir, reason: downloaded.reason });
       return { kind: "video", sourceUrl: url, status: "unknown", title, text: "", reason: "No public caption track was exposed by the video" };
     }
     const separator = track.baseUrl.includes("?") ? "&" : "?";
@@ -163,6 +169,10 @@ async function collectYouTubeTranscript(context: BrowserContext, url: string, ou
       }
     }
     if (!text) text = await extractTranscriptFromUi(page);
+    if (!text) {
+      const downloaded = await extractTranscriptWithYtDlp(url, outputRoot, relativeDir, timeoutMs);
+      if (downloaded) return saveTranscript({ url, title, text: downloaded.text, language: downloaded.language, outputRoot, relativeDir, reason: downloaded.reason });
+    }
     if (!text) return { kind: "video", sourceUrl: url, status: "unknown", title, text: "", reason: "The public caption track contained no readable transcript" };
     return saveTranscript({ url, title, text, language: track.languageCode, outputRoot, relativeDir, reason: `Extracted public ${track.languageCode || "unknown-language"} captions` });
   } catch (cause) {
@@ -170,6 +180,37 @@ async function collectYouTubeTranscript(context: BrowserContext, url: string, ou
   } finally {
     await page.close();
   }
+}
+
+async function extractTranscriptWithYtDlp(url: string, outputRoot: string, relativeDir: string, timeoutMs: number): Promise<{ text: string; language: string | undefined; reason: string } | null> {
+  const executable = process.env.SPACEAPPS_YT_DLP || "yt-dlp";
+  const directory = path.join(outputRoot, relativeDir, "yt-dlp");
+  await mkdir(directory, { recursive: true });
+  const template = path.join(directory, "captions.%(language)s.%(ext)s");
+  try {
+    await execFileAsync(executable, [
+      "--ignore-config", "--no-playlist", "--skip-download", "--write-subs", "--write-auto-subs",
+      "--sub-langs", "en.*,es.*", "--sub-format", "vtt", "--output", template, url,
+    ], { timeout: Math.max(timeoutMs, 60_000), maxBuffer: 2_000_000 });
+    const files = (await readdir(directory)).filter((name) => name.endsWith(".vtt")).sort((a, b) => subtitlePriority(a) - subtitlePriority(b) || a.localeCompare(b));
+    const selected = files[0];
+    if (!selected) return null;
+    const text = cleanText(parseVtt(await readFile(path.join(directory, selected), "utf8")));
+    if (!text) return null;
+    const language = selected.match(/captions\.([^.]+)/)?.[1];
+    return { text, language, reason: `Extracted public ${language || "unknown-language"} captions with yt-dlp` };
+  } catch { return null; }
+}
+
+function subtitlePriority(value: string): number {
+  return /\.en(?:[.-]|$)/i.test(value) ? 0 : /\.es(?:[.-]|$)/i.test(value) ? 1 : 2;
+}
+
+function parseVtt(value: string): string {
+  const lines = value.replace(/<[^>]+>/g, "").split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && line !== "WEBVTT" && !/^Kind:|^Language:|^\d+$|-->/.test(line));
+  return lines.filter((line, index) => line !== lines[index - 1]).join(" ");
 }
 
 async function saveTranscript(input: { url: string; title: string; text: string; language: string | undefined; outputRoot: string; relativeDir: string; reason: string }): Promise<ContentEvidence> {
@@ -207,11 +248,17 @@ function youtubeId(value: string): string | null {
   } catch { return null; }
 }
 
-function isRepositoryUrl(value: string): boolean {
+function toRepositoryUrl(value: string): string | null {
   try {
-    const hostname = new URL(value).hostname.replace(/^www\./, "");
-    return hostname === "github.com" || hostname === "gitlab.com";
-  } catch { return false; }
+    const url = new URL(value);
+    const hostname = url.hostname.replace(/^www\./, "");
+    if (hostname === "github.com" || hostname === "gitlab.com") return value;
+    const githubPages = hostname.match(/^([a-z0-9-]+)\.github\.io$/i);
+    if (!githubPages?.[1]) return null;
+    const owner = githubPages[1];
+    const repository = url.pathname.split("/").filter(Boolean)[0] || `${owner}.github.io`;
+    return `https://github.com/${owner}/${repository}`;
+  } catch { return null; }
 }
 
 function isTextPath(value: string): boolean {

@@ -1,6 +1,6 @@
 {
   "name": "spaceapps-analyzer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Evidence-first CLI auditor for NASA Space Apps Challenge local events",
   "type": "module",
   "bin": {

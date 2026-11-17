@@ -73,7 +73,7 @@ function renderTeam(team: TeamAudit, locale: Locale): string {
 
 | ${locale === "es" ? "Verificación" : "Check"} | ${tr(locale, "result")} | ${locale === "es" ? "Detalle" : "Detail"} |
 | --- | --- | --- |
-${team.findings.filter((finding) => ["PROJECT_SUBMITTED", "PROJECT_SUMMARY", "PROJECT_DETAILS", "DEMO_LINK", "PROJECT_LINK", "NASA_DATA"].includes(finding.code)).map((finding) => `| ${findingLabel(locale, finding.code)} | ${statusIcon(finding.status)} ${statusLabel(locale, finding.status)} | ${escapeCell(findingMessage(locale, finding))} |`).join("\n")}
+${team.findings.filter((finding) => ["PROJECT_SUBMITTED", "PROJECT_SUMMARY", "PROJECT_DETAILS", "DEMO_LINK", "PROJECT_LINK", "NASA_DATA", "PROJECT_LANGUAGE"].includes(finding.code)).map((finding) => `| ${findingLabel(locale, finding.code)} | ${statusIcon(finding.status)} ${statusLabel(locale, finding.status)} | ${escapeCell(findingMessage(locale, finding))} |`).join("\n")}
 
 #### ${tr(locale, "publicLinks")}
 
