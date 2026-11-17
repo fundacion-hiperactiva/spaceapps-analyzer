@@ -98,6 +98,7 @@ export interface EventAudit {
   startedAt: string;
   completedAt: string;
   sourceUrl: string;
+  supplementalSources?: string[];
   event: {
     name: string;
     country: string;
@@ -126,4 +127,5 @@ export interface AuditOptions {
   maxTeams?: number;
   headed: boolean;
   rosterUrl?: string;
+  supplementalSources?: string[];
 }

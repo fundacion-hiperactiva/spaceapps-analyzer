@@ -14,6 +14,15 @@ const LOGIN_PATTERNS = [
   /this (?:video|file|page) is private/i,
 ];
 
+const BOT_PROTECTION_PATTERNS = [
+  /rayid\s*:/i,
+  /why this is happening/i,
+  /can(?:not|'t) get past this page/i,
+  /un momento/i,
+  /checking (?:your )?browser/i,
+  /verify you are human/i,
+];
+
 export async function settle(page: Page, timeoutMs: number): Promise<void> {
   await page.waitForLoadState("domcontentloaded", { timeout: timeoutMs });
   await page.waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, 7_500) }).catch(() => undefined);
@@ -148,8 +157,13 @@ export async function checkPublicLink(
   const slug = `${slugify(label)}-${shortHash(inputUrl)}`;
   const base = path.join(relativeDir, slug);
   try {
-    const response = await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    let response = await page.goto(inputUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
     await settle(page, timeoutMs);
+    if (response && response.status() >= 500) {
+      await page.waitForTimeout(1_500);
+      response = await page.reload({ waitUntil: "domcontentloaded", timeout: timeoutMs }).catch(() => response);
+      await settle(page, timeoutMs).catch(() => undefined);
+    }
     const finalUrl = page.url();
     const title = await page.title();
     const text = cleanText(await page.locator("body").innerText().catch(() => ""));
@@ -163,10 +177,14 @@ export async function checkPublicLink(
     const httpStatus = response?.status() ?? null;
     const loginWall = /accounts\.google\.com|\/login|\/signin/i.test(finalUrl)
       || LOGIN_PATTERNS.some((pattern) => pattern.test(`${title}\n${text.slice(0, 5_000)}`));
+    const botProtection = httpStatus === 403
+      && BOT_PROTECTION_PATTERNS.some((pattern) => pattern.test(`${title}\n${text.slice(0, 5_000)}`));
     const badStatus = httpStatus !== null && httpStatus >= 400;
     const empty = text.length < 30 && !/\.pdf(?:$|\?)/i.test(finalUrl);
-    const status = badStatus || loginWall ? "fail" : empty ? "warn" : "pass";
-    const reason = badStatus
+    const status = botProtection ? "warn" : badStatus || loginWall ? "fail" : empty ? "warn" : "pass";
+    const reason = botProtection
+      ? `HTTP ${httpStatus}: the automated browser encountered an anti-bot interstitial; manual verification is required`
+      : badStatus
       ? `HTTP ${httpStatus}`
       : loginWall
         ? "The destination requires authentication or access approval"
@@ -185,12 +203,33 @@ export async function checkPublicLink(
       textPath: toRelative(outputRoot, textFile),
     };
   } catch (cause) {
+    const finalUrl = page.url() || inputUrl;
+    const text = cleanText(await page.locator("body").innerText().catch(() => ""));
+    if (finalUrl !== "about:blank" && text.length >= 30) {
+      const screenshot = path.join(outputRoot, `${base}.png`);
+      const textFile = path.join(outputRoot, `${base}.txt`);
+      await Promise.all([
+        page.screenshot({ path: screenshot, fullPage: true, animations: "disabled" }).catch(() => undefined),
+        writeUtf8(textFile, text),
+      ]);
+      return {
+        label,
+        url: inputUrl,
+        status: "warn",
+        httpStatus: null,
+        finalUrl,
+        reason: `Navigation did not complete, but public content rendered: ${cause instanceof Error ? cause.message.split("\n")[0] : String(cause)}`,
+        checkedAt,
+        screenshotPath: toRelative(outputRoot, screenshot),
+        textPath: toRelative(outputRoot, textFile),
+      };
+    }
     return {
       label,
       url: inputUrl,
       status: "fail",
       httpStatus: null,
-      finalUrl: page.url() || inputUrl,
+      finalUrl,
       reason: cause instanceof Error ? cause.message : String(cause),
       checkedAt,
     };

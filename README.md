@@ -46,6 +46,7 @@ Useful options:
 --timeout <ms>          Navigation timeout (default: 30000)
 --max-teams <n>         Limit discovered teams
 --roster-url <url>      Public organizer roster with completion/withdrawal statuses
+--supplemental-source   Additional public organizer source (repeatable)
 --no-external-checks    Skip public project-link checks
 --no-pdf                Skip PDF rendering
 --headed                Show Chromium while crawling

@@ -85,6 +85,9 @@ export async function auditEvent(inputUrl: string, options: AuditOptions): Promi
       startedAt,
       completedAt,
       sourceUrl: sourceUrl.href,
+      ...(options.supplementalSources?.length
+        ? { supplementalSources: options.supplementalSources.map((value) => validatePublicHttpUrl(value).href) }
+        : {}),
       event: {
         name: identity.name,
         country: identity.country,
@@ -136,12 +139,12 @@ async function auditTeam(input: {
       pages.about = aboutCapture;
       about = await visibleTabPanelText(page);
     }
-    const aboutChallengeLink = await extractChallengeLink(page, year);
+    const aboutChallengeLink = await extractChallengeLink(page, year, listing.challenge);
 
     const projectCapture = await captureTeamTab(page, "Project", outputDir, `${base}/project`);
     if (projectCapture) pages.project = projectCapture;
     const project = await extractProject(page);
-    const projectChallengeLink = await extractChallengeLink(page, year);
+    const projectChallengeLink = await extractChallengeLink(page, year, listing.challenge);
     const challengeLink = projectChallengeLink.url ? projectChallengeLink : aboutChallengeLink;
 
     const membersCapture = await captureTeamTab(page, "Members", outputDir, `${base}/members`);

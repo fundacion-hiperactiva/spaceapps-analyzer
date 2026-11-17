@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import type { ProjectEvidence, RosterEntry, RosterStatus } from "./types.js";
-import { cleanText } from "./utils.js";
+import { cleanText, slugify } from "./utils.js";
 
 export interface TeamListing {
   name: string;
@@ -95,13 +95,20 @@ export async function extractProject(page: Page): Promise<ProjectEvidence> {
   };
 }
 
-export async function extractChallengeLink(page: Page, year: string): Promise<{ title: string; url: string | null }> {
+export async function extractChallengeLink(page: Page, year: string, fallbackTitle = ""): Promise<{ title: string; url: string | null }> {
   const links = await page.locator(`a[href*="/${year}/challenges/"]`).evaluateAll((nodes) => nodes.map((node) => {
     const anchor = node as HTMLAnchorElement;
     return { title: (anchor.textContent || "").trim(), url: anchor.href };
   }));
   const specific = links.find((link) => new URL(link.url).pathname !== `/${year}/challenges/`);
-  return specific ?? { title: "", url: null };
+  if (specific) return specific;
+  if (fallbackTitle) {
+    return {
+      title: fallbackTitle,
+      url: new URL(`/${year}/challenges/${slugify(fallbackTitle)}/`, page.url()).href,
+    };
+  }
+  return { title: "", url: null };
 }
 
 export async function extractMembers(page: Page): Promise<string[]> {

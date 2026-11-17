@@ -27,6 +27,7 @@ program
   .option("--timeout <milliseconds>", "navigation timeout", parsePositiveInteger, 30_000)
   .option("--max-teams <number>", "limit teams (useful for a smoke run)", parsePositiveInteger)
   .option("--roster-url <url>", "public organizer roster with completion/withdrawal statuses")
+  .option("--supplemental-source <url>", "additional public organizer source (repeatable)", collectValue, [])
   .option("--no-external-checks", "skip public-access checks for project links")
   .option("--no-pdf", "skip PDF rendering")
   .option("--headed", "show the Chromium browser", false)
@@ -42,6 +43,7 @@ program
     };
     if (flags.maxTeams !== undefined) options.maxTeams = Number(flags.maxTeams);
     if (flags.rosterUrl !== undefined) options.rosterUrl = String(flags.rosterUrl);
+    if (Array.isArray(flags.supplementalSource) && flags.supplementalSource.length) options.supplementalSources = flags.supplementalSource.map(String);
     process.stderr.write(`Auditing ${localEventUrl}\nEvidence: ${outputDir}\n`);
     const audit = await auditEvent(localEventUrl, options);
     const includePdf = flags.pdf !== false;
@@ -113,6 +115,8 @@ function parsePositiveInteger(value: string): number {
   if (!Number.isInteger(number) || number <= 0) throw new Error(`Expected a positive integer, received: ${value}`);
   return number;
 }
+
+function collectValue(value: string, previous: string[]): string[] { return [...previous, value]; }
 
 function exitCode(audit: EventAudit, failOn: string): number {
   if (failOn === "never") return 0;

@@ -20,6 +20,7 @@ export function renderMarkdown(audit: EventAudit, locale: Locale): string {
 | ${tr(locale, "country")} | ${escapeCell(audit.event.country)} |
 | ${tr(locale, "year")} | ${audit.event.year} |
 | ${tr(locale, "source")} | ${link(audit.sourceUrl, audit.sourceUrl)} |
+${audit.supplementalSources?.map((url) => `| ${tr(locale, "supplementalSources")} | ${link(url, url)} |`).join("\n") ?? ""}
 | ${tr(locale, "started")} | ${audit.startedAt} |
 | ${locale === "es" ? "Finalización" : "Completed"} | ${audit.completedAt} |
 | ${tr(locale, "registered")} | ${audit.roster?.registered ?? audit.summary.totalTeams} |
