@@ -16,7 +16,7 @@ The tool never logs in, submits forms, bypasses access controls, or executes par
 ## Installation
 
 ```bash
-git clone https://github.com/hiperactiva-org/spaceapps-analyzer.git
+git clone https://github.com/fundacion-hiperactiva/spaceapps-analyzer.git
 cd spaceapps-analyzer
 pnpm install
 pnpm exec playwright install chromium
@@ -179,7 +179,7 @@ pnpm dev -- report audit-output/cordoba-2026/audit.json
 
 ## Reporting bugs and requesting features
 
-Open a [GitHub issue](https://github.com/hiperactiva-org/spaceapps-analyzer/issues/new/choose) before starting significant work.
+Open a [GitHub issue](https://github.com/fundacion-hiperactiva/spaceapps-analyzer/issues/new/choose) before starting significant work.
 
 For a bug, include:
 

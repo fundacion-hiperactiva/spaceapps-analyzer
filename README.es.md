@@ -16,7 +16,7 @@ La herramienta nunca inicia sesión, envía formularios, evade controles de acce
 ## Instalación
 
 ```bash
-git clone https://github.com/hiperactiva-org/spaceapps-analyzer.git
+git clone https://github.com/fundacion-hiperactiva/spaceapps-analyzer.git
 cd spaceapps-analyzer
 pnpm install
 pnpm exec playwright install chromium
@@ -179,7 +179,7 @@ pnpm dev -- report audit-output/cordoba-2026/audit.json
 
 ## Informar errores y solicitar funcionalidades
 
-Abrir un [Issue de GitHub](https://github.com/hiperactiva-org/spaceapps-analyzer/issues/new/choose) antes de comenzar un cambio importante.
+Abrir un [Issue de GitHub](https://github.com/fundacion-hiperactiva/spaceapps-analyzer/issues/new/choose) antes de comenzar un cambio importante.
 
 Para un error, incluir:
 
