@@ -12,7 +12,7 @@ The automated result is an auditable signal, not a judging decision. The tool do
 ## Quick start
 
 ```bash
-git clone https://gitlab.com/fundacion-hiperactiva/spaceapps-analyzer.git
+git clone https://github.com/hiperactiva-org/spaceapps-analyzer.git
 cd spaceapps-analyzer
 pnpm install
 pnpm exec playwright install chromium
@@ -23,7 +23,7 @@ pnpm dev -- audit \
 
 ## Contributing
 
-Report bugs and request features through [GitLab Issues](https://gitlab.com/fundacion-hiperactiva/spaceapps-analyzer/-/issues/new). Development follows GitFlow: create `feature/*` or `fix/*` from `develop`, merge into `develop`, validate through `testing`, and promote releases to `main`.
+Report bugs and request features through [GitHub Issues](https://github.com/hiperactiva-org/spaceapps-analyzer/issues/new/choose). Development follows GitFlow: create `feature/*` or `fix/*` from `develop`, open a pull request into `develop`, validate through `testing`, and promote releases to `main`.
 
 See the language-specific documentation for installation, Codex workflows, audit options, limitations, and contribution instructions.
 

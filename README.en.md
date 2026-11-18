@@ -16,7 +16,7 @@ The tool never logs in, submits forms, bypasses access controls, or executes par
 ## Installation
 
 ```bash
-git clone https://gitlab.com/fundacion-hiperactiva/spaceapps-analyzer.git
+git clone https://github.com/hiperactiva-org/spaceapps-analyzer.git
 cd spaceapps-analyzer
 pnpm install
 pnpm exec playwright install chromium
@@ -179,7 +179,7 @@ pnpm dev -- report audit-output/cordoba-2026/audit.json
 
 ## Reporting bugs and requesting features
 
-Open a [GitLab issue](https://gitlab.com/fundacion-hiperactiva/spaceapps-analyzer/-/issues/new) before starting significant work.
+Open a [GitHub issue](https://github.com/hiperactiva-org/spaceapps-analyzer/issues/new/choose) before starting significant work.
 
 For a bug, include:
 
@@ -211,7 +211,7 @@ git switch -c feature/<issue-id>-short-description
 # or: git switch -c fix/<issue-id>-short-description
 ```
 
-Before opening a merge request:
+Before opening a pull request:
 
 ```bash
 pnpm check
@@ -219,7 +219,7 @@ git diff --check
 git push -u origin feature/<issue-id>-short-description
 ```
 
-Open the merge request against `develop` and link the issue. Do not commit directly to `develop`, `testing`, or `main`.
+Open the pull request against `develop` and link the issue. Do not commit directly to `develop`, `testing`, or `main`.
 
 Promotion path:
 
@@ -230,7 +230,7 @@ feature/* or fix/* → develop → testing → main
 - Merge focused feature/fix branches into `develop` after review and CI.
 - Promote `develop` to `testing` for release-candidate validation, including representative live audits when appropriate.
 - Promote `testing` to `main` only after validation succeeds.
-- Use merge requests for every promotion so review and CI history remain visible.
+- Use pull requests for every promotion so review and CI history remain visible.
 
 ## Development and CI
 
@@ -241,7 +241,7 @@ pnpm build
 pnpm check
 ```
 
-GitLab CI and GitHub Actions run type checking, unit tests, and a production build. Live crawling is excluded from default CI because third-party availability must not make code validation flaky.
+GitHub Actions and the private GitLab mirror run type checking, unit tests, and a production build. Live crawling is excluded from default CI because third-party availability must not make code validation flaky.
 
 ## Responsible use
 

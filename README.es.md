@@ -16,7 +16,7 @@ La herramienta nunca inicia sesión, envía formularios, evade controles de acce
 ## Instalación
 
 ```bash
-git clone https://gitlab.com/fundacion-hiperactiva/spaceapps-analyzer.git
+git clone https://github.com/hiperactiva-org/spaceapps-analyzer.git
 cd spaceapps-analyzer
 pnpm install
 pnpm exec playwright install chromium
@@ -179,7 +179,7 @@ pnpm dev -- report audit-output/cordoba-2026/audit.json
 
 ## Informar errores y solicitar funcionalidades
 
-Abrir un [Issue de GitLab](https://gitlab.com/fundacion-hiperactiva/spaceapps-analyzer/-/issues/new) antes de comenzar un cambio importante.
+Abrir un [Issue de GitHub](https://github.com/hiperactiva-org/spaceapps-analyzer/issues/new/choose) antes de comenzar un cambio importante.
 
 Para un error, incluir:
 
@@ -211,7 +211,7 @@ git switch -c feature/<issue-id>-descripcion-breve
 # o: git switch -c fix/<issue-id>-descripcion-breve
 ```
 
-Antes de abrir un merge request:
+Antes de abrir un pull request:
 
 ```bash
 pnpm check
@@ -219,7 +219,7 @@ git diff --check
 git push -u origin feature/<issue-id>-descripcion-breve
 ```
 
-Abrir el merge request hacia `develop` y vincular el Issue. No realizar commits directos en `develop`, `testing` o `main`.
+Abrir el pull request hacia `develop` y vincular el Issue. No realizar commits directos en `develop`, `testing` o `main`.
 
 Camino de promoción:
 
@@ -230,7 +230,7 @@ feature/* o fix/* → develop → testing → main
 - Integrar ramas pequeñas de funcionalidad o corrección en `develop` luego de revisión y CI.
 - Promover `develop` a `testing` para validar el candidato, incluyendo auditorías reales representativas cuando corresponda.
 - Promover `testing` a `main` sólo cuando la validación sea satisfactoria.
-- Usar merge requests para cada promoción, conservando visibles la revisión y el historial de CI.
+- Usar pull requests para cada promoción, conservando visibles la revisión y el historial de CI.
 
 ## Desarrollo y CI
 
@@ -241,7 +241,7 @@ pnpm build
 pnpm check
 ```
 
-GitLab CI y GitHub Actions ejecutan comprobación de tipos, pruebas unitarias y compilación de producción. La navegación real no forma parte del CI predeterminado porque la disponibilidad de terceros no debe volver inestable la validación del código.
+GitHub Actions y el espejo privado de GitLab ejecutan comprobación de tipos, pruebas unitarias y compilación de producción. La navegación real no forma parte del CI predeterminado porque la disponibilidad de terceros no debe volver inestable la validación del código.
 
 ## Uso responsable
 
