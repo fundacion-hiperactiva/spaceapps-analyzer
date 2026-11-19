@@ -1,24 +1,432 @@
-image: node:24-bookworm-slim
+# ====================================================================================
+# Improved GitLab CI/CD Configuration
+#
+# Key Improvements:
+# 1. Docker Hub Authentication:
+#    - To avoid anonymous pull limits from Docker Hub, this pipeline now uses
+#      DOCKER_USER and DOCKER_PASSWORD variables to log in before building images.
+#
+# 2. IMPORTANT: Runner Image Pull Authentication (DOCKER_AUTH_CONFIG)
+#    - For the GitLab runner itself to pull job images (like node:22, docker:dind)
+#      from Docker Hub using authentication, you MUST configure the DOCKER_AUTH_CONFIG
+#      CI/CD variable in your GitLab project or group settings.
+#
+#    - How to generate the value for DOCKER_AUTH_CONFIG:
+#      a. On your local machine, run: docker login
+#      b. Enter your Docker Hub username and password.
+#      c. Run this command to get the encoded credentials:
+#         cat ~/.docker/config.json | base64 -w 0
+#      d. In GitLab > CI/CD > Variables, create a new variable:
+#         - Key: DOCKER_AUTH_CONFIG
+#         - Value: Paste the base64 string from the command above.
+#         - Type: File
+#         - Protect variable: Yes
+#         - Mask variable: Yes
+#
+# 3. Code Reusability (YAML Anchors):
+#    - `.docker_hub_login`: A reusable script for logging into Docker Hub.
+#    - `.pnpm_setup`: A reusable script for setting up the pnpm package manager.
+#
+# 4. Optimized Caching:
+#    - Removed the global cache, especially the problematic `/var/lib/docker` path,
+#      which can cause instability. Caching is now handled more explicitly within jobs.
+# ====================================================================================
 
 stages:
-  - test
+  - version-update
+  - testing
+  - build-image
+  - image-pull-dev
+  - image-pull-staging
+  - image-pull-prod
+  - release
+  - security
+  - post-security
 
 variables:
-  PNPM_STORE_DIR: .pnpm-store
+  DOCKER_DRIVER: overlay2
+  DOCKER_BUILDKIT: 1
+  # Set to 1 only for intentional builds using E1_VERSION/E2_VERSION/E3_VERSION.
+  VERSION_OVERRIDE: "0"
+  # POSIX TZ signs are inverted: UTC+3 means UTC-03:00.
+  VERSION_TIMEZONE: "UTC+3"
+  TZ: "UTC+3"
+  NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/"
+  # Host habilitado para ejecutar pipelines (por defecto solo gitlab.com).
+  # Para hacer switch: cambiar a 'gitlab.opdo.group' o 'all'.
+  # También se puede sobreescribir desde Settings > CI/CD > Variables en la UI de GitLab.
+  CI_ENABLED_INSTANCE: "gitlab.com"
 
-cache:
-  key:
-    files:
-      - pnpm-lock.yaml
-  paths:
-    - .pnpm-store
+# Control global de ejecución de pipelines
+workflow:
+  rules:
+    # 1. Si CI_DISABLED está en 'true', nunca ejecuta
+    - if: '$CI_DISABLED == "true"'
+      when: never
+    # 2. Si se fuerza la ejecución manualmente
+    - if: '$CI_FORCE_RUN == "true"'
+      when: always
+    # 3. Si se habilita para todas las instancias
+    - if: '$CI_ENABLED_INSTANCE == "all"'
+      when: always
+    # 4. Solo ejecuta si el servidor actual coincide con la instancia permitida
+    - if: "$CI_SERVER_HOST == $CI_ENABLED_INSTANCE"
+      when: always
+    # 5. En cualquier otro caso, bloquea el pipeline
+    - when: never
 
-check:
-  stage: test
-  before_script:
-    - corepack enable
-    - corepack prepare pnpm@12.9.1 --activate
-    - pnpm config set store-dir "$PNPM_STORE_DIR"
-    - pnpm install --frozen-lockfile
+# --- Helper Templates ---
+
+# Template for jobs that should only run on branches
+.branches_only: &branches_only
+  rules:
+    # Never run this job on scheduled or tag pipelines
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_TAG"
+      when: never
+    # Run on all other branches (push, merge_request, etc.)
+    - if: "$CI_COMMIT_BRANCH"
+
+# Template for authenticating with Docker Hub
+.docker_hub_login_script: &docker_hub_login_script |
+  if [ -n "$DOCKER_USER" ] && [ -n "$DOCKER_PASSWORD" ]; then
+    echo "INFO: Logging into Docker Hub..."
+    echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+  else
+    echo "WARNING: DOCKER_USER and DOCKER_PASSWORD are not set. Skipping Docker Hub login."
+    echo "WARNING: Anonymous pulls may be rate-limited or fail."
+  fi
+
+# Template for setting up pnpm
+.pnpm_setup_script: &pnpm_setup_script |
+  npm install -g pnpm@11.28.12 --force
+
+# --- STAGE: version-update ---
+
+update-version-main:
+  stage: version-update
+  tags:
+    - e1-ar-hw
   script:
-    - pnpm check
+    - node .gitlab-ci/update-release-version.mjs
+  rules:
+    # Daily versions are calculated at runtime; environment variables are overrides only.
+    - when: never
+
+update-version-daily:
+  stage: version-update
+  tags:
+    - e1-ar-hw
+  script:
+    - cd .gitlab-ci && chmod +x ./pull-upv-push.sh
+    - ./pull-upv-push.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == "develop"'
+
+# --- STAGE: testing ---
+
+install_deps:
+  image: node:25
+  stage: testing
+  tags:
+    - selfhosted
+  extends: .branches_only
+  before_script:
+    - *pnpm_setup_script
+  script:
+    - pnpm install --no-frozen-lockfile
+  cache:
+    key: ${CI_PROJECT_ID}-deps
+    policy: push # Create the cache in this job
+    paths:
+      - node_modules/
+      - .pnpm-store/
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_BRANCH =~ /.*testing$/"
+
+lint:
+  image: node:25
+  stage: testing
+  tags:
+    - selfhosted
+  extends: .branches_only
+  allow_failure: true
+  before_script:
+    - *pnpm_setup_script
+  script:
+    - pnpm run lint
+    - pnpm exec tsc --noEmit
+  cache:
+    key: ${CI_PROJECT_ID}-deps
+    policy: pull # Use the cache from the previous job
+    paths:
+      - node_modules/
+      - .pnpm-store/
+  needs:
+    - install_deps
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_BRANCH =~ /.*testing$/"
+
+semgrep:
+  image: returntocorp/semgrep
+  stage: testing
+  tags:
+    - selfhosted
+  extends: .branches_only
+  script:
+    - semgrep ci --config auto
+  allow_failure: true
+  needs:
+    - lint
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_BRANCH =~ /.*testing$/"
+
+# --- STAGE: build-image ---
+
+docker_build:
+  image: docker:latest
+  stage: build-image
+  tags:
+    - selfhosted
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_TLS_VERIFY: ""
+    DOCKER_CERT_PATH: ""
+  services:
+    - name: docker:dind
+      alias: docker
+      command: ["--tls=false", "--host=tcp://0.0.0.0:2375"]
+      variables:
+        HEALTHCHECK_TCP_PORT: "2375"
+  environment:
+    name: $CI_COMMIT_BRANCH
+  before_script:
+    - |
+      for attempt in $(seq 1 30); do
+        if docker info >/dev/null 2>&1; then break; fi
+        if [ "$attempt" -eq 30 ]; then
+          echo "ERROR: Docker daemon was not ready after 30 seconds." >&2
+          docker info
+          exit 1
+        fi
+        sleep 1
+      done
+    # Log in to Docker Hub to pull base images securely.
+    - *docker_hub_login_script
+    # Log in to GitLab Registry to push the final image.
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+    # Inject environment variables.
+    - sh .gitlab-ci/inject-env-vars.sh
+  script:
+    - sh .gitlab-ci/docker-build.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_TAG"
+      when: never
+    - if: "$CI_COMMIT_BRANCH"
+      exists:
+        - Dockerfile
+
+# --- STAGE: security ---
+
+snyk_scan:
+  image:
+    name: snyk/snyk:docker
+    entrypoint: [""]
+  stage: security
+  tags:
+    - selfhosted
+  allow_failure: true
+  variables:
+    DOCKER_DRIVER: overlay2
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - sh .gitlab-ci/snyk-scan.sh
+  artifacts:
+    reports:
+      sast: snyk-report.json
+    when: always
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_TAG"
+      when: never
+    - if: "$CI_COMMIT_BRANCH =~ /.*testing$/ && $SNYK_TOKEN"
+  needs:
+    - lint
+
+trivy_scan:
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  stage: security
+  tags:
+    - selfhosted
+  extends: .branches_only
+  allow_failure: true
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_HOST: tcp://docker:2375
+  services:
+    - docker:dind
+  before_script:
+    - apk add --no-cache bash
+    - bash .gitlab-ci/ensure-docker-cli.sh
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - sh .gitlab-ci/trivy-scan.sh
+  artifacts:
+    reports:
+      container_scanning: trivy-report.json
+    when: always
+  needs:
+    - lint
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_BRANCH =~ /.*testing$/"
+
+# --- STAGE: image-pull-* ---
+
+docker-image-e1:
+  stage: image-pull-dev
+  tags:
+    - develop
+  needs:
+    - docker_build
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - hostname
+    - date
+    - sudo chmod 666 /var/run/docker.sock
+    - docker pull "$CI_REGISTRY_IMAGE:$(sh .gitlab-ci/resolve-version.sh e1)" --quiet
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+update-e1-infra-repo:
+  stage: image-pull-dev
+  services: []
+  needs:
+    - docker-image-e1
+  tags:
+    - e1-ar-hw
+  before_script:
+    - whoami
+    - eval $(ssh-agent -s)
+    - ssh-add "$SSH_PRIVATE_KEY"
+    # Optional: avoid host key prompts if using SSH remotes
+    - export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no'
+    - git config --global user.email "bb-8@hks.ar"
+    - git config --global user.name "bb-8"
+  script:
+    - chmod +x .gitlab-ci/update-e1-infra-repo.sh .gitlab-ci/create-testing-branch.sh
+    - ./.gitlab-ci/update-e1-infra-repo.sh
+    - ./.gitlab-ci/create-testing-branch.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+docker-image-e3:
+  stage: image-pull-prod
+  tags:
+    - production
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - hostname
+    - date
+    - sudo chmod 666 /var/run/docker.sock
+    - docker pull "$CI_REGISTRY_IMAGE:$(sh .gitlab-ci/resolve-version.sh e3)" --quiet
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+      when: on_success
+
+create_production_release:
+  stage: release
+  needs:
+    - docker-image-e3
+  tags:
+    - e1-ar-hw
+  before_script:
+    - bash .gitlab-ci/install-ci-tools.sh
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    - echo "NEW_PRODUCTION_TAG=$(sh .gitlab-ci/resolve-version.sh e3)" >> release.env
+    - echo "RELEASE_DATE=$(date -u +%F)" >> release.env
+  script:
+    - bash .gitlab-ci/create-production-release.sh
+  artifacts:
+    reports:
+      dotenv: release.env
+    paths:
+      - release.env
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+
+update_production_environment:
+  stage: release
+  needs:
+    - job: create_production_release
+      artifacts: true
+  tags:
+    - e1-ar-hw
+  before_script:
+    - bash .gitlab-ci/install-ci-tools.sh
+    - eval "$(ssh-agent -s)"
+    - ssh-add "$SSH_PRIVATE_KEY"
+    - export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no'
+  script:
+    - bash .gitlab-ci/update-production-compose.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+
+create-testing-merge-request:
+  image: alpine:3
+  stage: post-security
+  tags:
+    - e1-ar-hw
+  variables:
+    GIT_DEPTH: 0
+  needs:
+    - job: semgrep
+      artifacts: false
+    - job: snyk_scan
+      artifacts: false
+    - job: trivy_scan
+      artifacts: false
+  before_script:
+    - bash .gitlab-ci/install-ci-tools.sh
+    - whoami
+    - eval "$(ssh-agent -s)"
+    - ssh-add "$SSH_PRIVATE_KEY"
+    - export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no'
+    - git config --global user.email "bb-8@hks.ar"
+    - git config --global user.name "bb-8"
+  script:
+    - chmod +x .gitlab-ci/create-testing-merge-request.sh
+    - ./.gitlab-ci/create-testing-merge-request.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "testing"'

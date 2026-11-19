@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Pre-commit hook to run linting
+
+echo "Running pre-commit hook..."
+
+if [ -f package.json ] && grep -q '"lint":' package.json; then
+  echo "Running lint check..."
+  if [ -f pnpm-lock.yaml ]; then
+    pnpm run lint
+  elif [ -f yarn.lock ]; then
+    yarn run lint
+  else
+    npm run lint
+  fi
+else
+  echo "No lint script found in package.json. Skipping."
+fi
