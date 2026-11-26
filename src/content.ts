@@ -1,11 +1,11 @@
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { mkdir, readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { BrowserContext } from "playwright";
 import { settle } from "./capture.js";
 import type { ContentEvidence } from "./types.js";
-import { cleanText, toRelative, writeUtf8 } from "./utils.js";
+import { cleanText, shortHash, toRelative, validatePublicHttpUrl, writeUtf8 } from "./utils.js";
 
 const TEXT_EXTENSIONS = new Set([
   ".md", ".mdx", ".txt", ".rst", ".json", ".yaml", ".yml", ".toml", ".csv",
@@ -22,50 +22,56 @@ export async function collectExternalContent(input: {
   context: BrowserContext;
   projectUrl: string | null;
   demoUrl: string | null;
+  resourceUrls?: string[];
   outputRoot: string;
   relativeDir: string;
   timeoutMs: number;
 }): Promise<ContentEvidence[]> {
   const evidence: ContentEvidence[] = [];
-  const urls = [...new Set([input.projectUrl, input.demoUrl].filter((value): value is string => Boolean(value)))];
+  const urls = [...new Set([input.projectUrl, input.demoUrl, ...(input.resourceUrls ?? [])].filter((value): value is string => Boolean(value)))];
   const repositoryUrl = urls.map(toRepositoryUrl).find((value): value is string => Boolean(value));
   const videoUrl = urls.find((value) => youtubeId(value));
-  if (repositoryUrl) evidence.push(await collectRepository(repositoryUrl, input.outputRoot, input.relativeDir, input.timeoutMs));
+  if (repositoryUrl) evidence.push(...await collectRepository(repositoryUrl, input.outputRoot, input.relativeDir, input.timeoutMs));
   if (videoUrl) evidence.push(await collectYouTubeTranscript(input.context, videoUrl, input.outputRoot, input.relativeDir, input.timeoutMs));
+  for (const presentationUrl of urls.filter(isPresentationUrl)) {
+    if (presentationUrl !== videoUrl && presentationUrl !== repositoryUrl) evidence.push(await collectPresentation(presentationUrl, input.outputRoot, input.relativeDir, input.timeoutMs));
+  }
   return evidence;
 }
 
-async function collectRepository(url: string, outputRoot: string, relativeDir: string, timeoutMs: number): Promise<ContentEvidence> {
+export async function collectRepository(url: string, outputRoot: string, relativeDir: string, timeoutMs: number): Promise<ContentEvidence[]> {
   const source = new URL(url);
-  if (source.hostname.replace(/^www\./, "") === "gitlab.com") return collectGitLab(url, outputRoot, relativeDir, timeoutMs);
-  const [owner, rawRepo] = source.pathname.split("/").filter(Boolean);
-  const repo = rawRepo?.replace(/\.git$/i, "");
-  if (!owner || !repo) return { kind: "repository", sourceUrl: url, status: "unknown", title: "GitHub repository", text: "", reason: "The GitHub owner or repository name could not be resolved" };
+  const host = source.hostname.replace(/^www\./, "");
+  const segments = source.pathname.split("/-/")[0]!.split("/").filter(Boolean);
+  const repositorySegments = host === "github.com" ? segments.slice(0, 2) : segments;
+  const repo = repositorySegments.at(-1)?.replace(/\.git$/i, "");
+  const owner = repositorySegments.slice(0, -1).join("/");
+  if (!owner || !repo) return [{ kind: "repository", sourceUrl: url, status: "unknown", title: "Repository", text: "", reason: "The repository owner or name could not be resolved" }];
 
   try {
-    const headers = { Accept: "application/vnd.github+json", "User-Agent": "spaceapps-analyzer" };
-    const metadata = await fetchJson(`https://api.github.com/repos/${owner}/${repo}`, headers, timeoutMs) as { default_branch?: string; full_name?: string };
-    const branch = metadata.default_branch || "main";
-    const tree = await fetchJson(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`, headers, timeoutMs) as { tree?: Array<{ path: string; type: string; size?: number }> };
-    const candidates = (tree.tree ?? [])
-      .filter((item) => item.type === "blob" && isTextPath(item.path) && (item.size ?? 0) <= MAX_FILE_CHARS * 2)
-      .sort((a, b) => priority(a.path) - priority(b.path) || a.path.localeCompare(b.path))
-      .slice(0, MAX_FILES);
+    const cloneDir = path.join(outputRoot, relativeDir, "repository");
+    const exists = await stat(path.join(cloneDir, ".git")).then(() => true).catch(() => false);
+    if (!exists) {
+      await mkdir(path.dirname(cloneDir), { recursive: true });
+      const cloneUrl = `${source.origin}/${[...repositorySegments.slice(0, -1), repo].join("/")}.git`;
+      await execFileAsync("git", ["clone", "--depth", "1", "--single-branch", cloneUrl, cloneDir], { timeout: Math.max(timeoutMs, 120_000), maxBuffer: 2_000_000 });
+    }
+    const allFiles = await listFiles(cloneDir);
+    const candidates = allFiles.filter((item) => isTextPath(item)).sort((a, b) => priority(a) - priority(b) || a.localeCompare(b)).slice(0, MAX_FILES);
     const sections: string[] = [];
     const files: string[] = [];
     let total = 0;
     for (const item of candidates) {
       if (total >= MAX_TOTAL_CHARS) break;
-      const encodedBranch = branch.split("/").map(encodeURIComponent).join("/");
-      const raw = `https://raw.githubusercontent.com/${owner}/${repo}/${encodedBranch}/${item.path.split("/").map(encodeURIComponent).join("/")}`;
-      const response = await fetch(raw, { signal: AbortSignal.timeout(timeoutMs), headers: { "User-Agent": "spaceapps-analyzer" } }).catch(() => null);
-      if (!response?.ok) continue;
-      const value = cleanText((await response.text()).slice(0, MAX_FILE_CHARS));
+      const file = path.join(cloneDir, item);
+      const size = await stat(file).then((value) => value.size).catch(() => 0);
+      if (!size || size > MAX_FILE_CHARS * 2) continue;
+      const value = cleanText((await readFile(file, "utf8").catch(() => "")).slice(0, MAX_FILE_CHARS));
       if (!value) continue;
       const remaining = MAX_TOTAL_CHARS - total;
       const clipped = value.slice(0, remaining);
-      sections.push(`FILE: ${item.path}\n${clipped}`);
-      files.push(item.path);
+      sections.push(`FILE: ${item}\n${clipped}`);
+      files.push(item);
       total += clipped.length;
     }
     const text = sections.join("\n\n");
@@ -73,66 +79,125 @@ async function collectRepository(url: string, outputRoot: string, relativeDir: s
     const manifestFile = path.join(outputRoot, relativeDir, "repository.json");
     await Promise.all([
       writeUtf8(textFile, text),
-      writeUtf8(manifestFile, `${JSON.stringify({ sourceUrl: url, repository: metadata.full_name || `${owner}/${repo}`, branch, files, characters: text.length }, null, 2)}\n`),
+      writeUtf8(manifestFile, `${JSON.stringify({ sourceUrl: url, repository: `${owner}/${repo}`, clonePath: toRelative(outputRoot, cloneDir), files, characters: text.length }, null, 2)}\n`),
     ]);
-    return {
+    const repositoryEvidence: ContentEvidence = {
       kind: "repository",
       sourceUrl: url,
       status: text.length >= 200 ? "pass" : "unknown",
-      title: metadata.full_name || `${owner}/${repo}`,
+      title: `${owner}/${repo}`,
       text,
-      reason: text.length >= 200 ? `Extracted ${files.length} public text files without executing repository code` : "No readable public repository content was extracted",
+      reason: text.length >= 200 ? `Cloned the repository and indexed ${files.length} text files without executing repository code` : "The repository was cloned, but no readable text content was extracted",
       textPath: toRelative(outputRoot, textFile),
       metadataPath: toRelative(outputRoot, manifestFile),
+      artifactPath: toRelative(outputRoot, cloneDir),
       items: files,
     };
+    const presentationFiles = allFiles.filter((item) => /\.(?:pdf|pptx?)$/i.test(item)).slice(0, 20);
+    const presentations = await Promise.all(presentationFiles.map((item) => collectClonedPresentation({
+      repositoryUrl: url,
+      file: path.join(cloneDir, item),
+      repositoryPath: item,
+      outputRoot,
+      relativeDir,
+      timeoutMs,
+    })));
+    return [repositoryEvidence, ...presentations];
   } catch (cause) {
-    return { kind: "repository", sourceUrl: url, status: "unknown", title: `${owner}/${repo}`, text: "", reason: cause instanceof Error ? cause.message : String(cause) };
+    return [{ kind: "repository", sourceUrl: url, status: "unknown", title: `${owner}/${repo}`, text: "", reason: cause instanceof Error ? cause.message : String(cause) }];
   }
 }
 
-async function collectGitLab(url: string, outputRoot: string, relativeDir: string, timeoutMs: number): Promise<ContentEvidence> {
-  const source = new URL(url);
-  const projectPath = source.pathname.split("/-/")[0]?.split("/").filter(Boolean).join("/") ?? "";
-  if (!projectPath.includes("/")) return { kind: "repository", sourceUrl: url, status: "unknown", title: "GitLab repository", text: "", reason: "The GitLab project path could not be resolved" };
-  try {
-    const projectId = encodeURIComponent(projectPath);
-    const metadata = await fetchJson(`https://gitlab.com/api/v4/projects/${projectId}`, {}, timeoutMs) as { id: number; default_branch?: string; path_with_namespace?: string };
-    const branch = metadata.default_branch || "main";
-    const tree = await fetchJson(`https://gitlab.com/api/v4/projects/${metadata.id}/repository/tree?recursive=true&per_page=100&ref=${encodeURIComponent(branch)}`, {}, timeoutMs) as Array<{ path: string; type: string }>;
-    const candidates = tree.filter((item) => item.type === "blob" && isTextPath(item.path))
-      .sort((a, b) => priority(a.path) - priority(b.path) || a.path.localeCompare(b.path)).slice(0, MAX_FILES);
-    const sections: string[] = [];
-    const files: string[] = [];
-    let total = 0;
-    for (const item of candidates) {
-      if (total >= MAX_TOTAL_CHARS) break;
-      const raw = `https://gitlab.com/api/v4/projects/${metadata.id}/repository/files/${encodeURIComponent(item.path)}/raw?ref=${encodeURIComponent(branch)}`;
-      const response = await fetch(raw, { signal: AbortSignal.timeout(timeoutMs), headers: { "User-Agent": "spaceapps-analyzer" } }).catch(() => null);
-      if (!response?.ok) continue;
-      const value = cleanText((await response.text()).slice(0, MAX_FILE_CHARS));
-      if (!value) continue;
-      const clipped = value.slice(0, MAX_TOTAL_CHARS - total);
-      sections.push(`FILE: ${item.path}\n${clipped}`);
-      files.push(item.path);
-      total += clipped.length;
-    }
-    const text = sections.join("\n\n");
-    const textFile = path.join(outputRoot, relativeDir, "repository.txt");
-    const manifestFile = path.join(outputRoot, relativeDir, "repository.json");
-    await Promise.all([
-      writeUtf8(textFile, text),
-      writeUtf8(manifestFile, `${JSON.stringify({ sourceUrl: url, repository: metadata.path_with_namespace || projectPath, branch, files, characters: text.length }, null, 2)}\n`),
-    ]);
-    return {
-      kind: "repository", sourceUrl: url, status: text.length >= 200 ? "pass" : "unknown",
-      title: metadata.path_with_namespace || projectPath, text,
-      reason: text.length >= 200 ? `Extracted ${files.length} public text files without executing repository code` : "No readable public repository content was extracted",
-      textPath: toRelative(outputRoot, textFile), metadataPath: toRelative(outputRoot, manifestFile), items: files,
-    };
-  } catch (cause) {
-    return { kind: "repository", sourceUrl: url, status: "unknown", title: projectPath, text: "", reason: cause instanceof Error ? cause.message : String(cause) };
+async function collectClonedPresentation(input: { repositoryUrl: string; file: string; repositoryPath: string; outputRoot: string; relativeDir: string; timeoutMs: number }): Promise<ContentEvidence> {
+  const extension = path.extname(input.file).toLowerCase();
+  const text = await extractPresentationText(input.file, extension, input.timeoutMs);
+  const textFile = path.join(input.outputRoot, input.relativeDir, `presentation-repository-${shortHash(input.repositoryPath)}.txt`);
+  await writeUtf8(textFile, text);
+  return {
+    kind: "presentation",
+    sourceUrl: input.repositoryUrl,
+    status: text.length >= 80 ? "pass" : "warn",
+    title: input.repositoryPath,
+    text,
+    reason: text.length >= 80 ? "Found a presentation in the cloned repository and extracted its text locally" : "Found a presentation in the cloned repository, but little readable text could be extracted",
+    textPath: toRelative(input.outputRoot, textFile),
+    artifactPath: toRelative(input.outputRoot, input.file),
+    items: [input.repositoryPath],
+  };
+}
+
+async function listFiles(root: string, current = ""): Promise<string[]> {
+  const directory = path.join(root, current);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const result: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === ".git" || entry.name === "node_modules" || entry.name.startsWith(".next")) continue;
+    const relative = path.posix.join(current.split(path.sep).join(path.posix.sep), entry.name);
+    if (entry.isDirectory()) result.push(...await listFiles(root, relative));
+    else if (entry.isFile()) result.push(relative);
   }
+  return result;
+}
+
+async function collectPresentation(url: string, outputRoot: string, relativeDir: string, timeoutMs: number): Promise<ContentEvidence> {
+  try {
+    const downloadUrl = validatePublicHttpUrl(presentationDownloadUrl(url)).href;
+    const response = await fetch(downloadUrl, { redirect: "follow", signal: AbortSignal.timeout(Math.max(timeoutMs, 60_000)), headers: { "User-Agent": "spaceapps-analyzer" } });
+    if (!response.ok) throw new Error(`Presentation download returned HTTP ${response.status}`);
+    const length = Number(response.headers.get("content-length") || 0);
+    if (length > 50_000_000) throw new Error("Presentation exceeds the 50 MB download limit");
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > 50_000_000) throw new Error("Presentation exceeds the 50 MB download limit");
+    const type = response.headers.get("content-type") || "";
+    const extension = type.includes("presentationml") || /\.pptx(?:$|[?#])/i.test(downloadUrl) ? ".pptx"
+      : type.includes("pdf") || /\.pdf(?:$|[?#])/i.test(downloadUrl) || downloadUrl.includes("format=pdf") ? ".pdf"
+        : type.includes("powerpoint") || /\.ppt(?:$|[?#])/i.test(downloadUrl) ? ".ppt"
+          : ".html";
+    const basename = `presentation-${shortHash(url)}`;
+    const artifact = path.join(outputRoot, relativeDir, `${basename}${extension}`);
+    await mkdir(path.dirname(artifact), { recursive: true });
+    await writeFile(artifact, bytes);
+    const text = await extractPresentationText(artifact, extension, timeoutMs);
+    const textFile = path.join(outputRoot, relativeDir, `${basename}.txt`);
+    await writeUtf8(textFile, text);
+    return { kind: "presentation", sourceUrl: url, status: text.length >= 80 ? "pass" : "warn", title: path.basename(new URL(url).pathname) || "Presentation", text, reason: text.length >= 80 ? "Downloaded the public presentation and extracted its text locally" : "Downloaded the public presentation, but little readable text could be extracted", textPath: toRelative(outputRoot, textFile), artifactPath: toRelative(outputRoot, artifact), items: [path.basename(artifact)] };
+  } catch (cause) {
+    return { kind: "presentation", sourceUrl: url, status: "unknown", title: "Presentation", text: "", reason: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
+
+async function extractPresentationText(file: string, extension: string, timeoutMs: number): Promise<string> {
+  if (extension === ".pdf") {
+    const output = `${file}.txt`;
+    await execFileAsync("pdftotext", ["-layout", file, output], { timeout: Math.max(timeoutMs, 60_000) }).catch(() => undefined);
+    return cleanText(await readFile(output, "utf8").catch(() => ""));
+  }
+  if (extension === ".pptx") {
+    const options = { timeout: Math.max(timeoutMs, 60_000), maxBuffer: 20_000_000 };
+    const slides = await execFileAsync("unzip", ["-p", file, "ppt/slides/slide*.xml"], options).catch(() => ({ stdout: "" }));
+    const notes = await execFileAsync("unzip", ["-p", file, "ppt/notesSlides/notesSlide*.xml"], options).catch(() => ({ stdout: "" }));
+    return cleanText(`${String(slides.stdout)}\n${String(notes.stdout)}`.replace(/<a:br\s*\/>/g, "\n").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"));
+  }
+  if (extension === ".ppt") {
+    const result = await execFileAsync("strings", [file], { timeout: Math.max(timeoutMs, 60_000), maxBuffer: 20_000_000 }).catch(() => ({ stdout: "" }));
+    return cleanText(String(result.stdout));
+  }
+  return cleanText(await readFile(file, "utf8").catch(() => "").then((value) => value.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ")));
+}
+
+function isPresentationUrl(value: string): boolean {
+  try { const url = new URL(value); return /\.(?:pdf|pptx?)(?:$|[?#])/i.test(value) || /(^|\.)docs\.google\.com$/.test(url.hostname) && url.pathname.includes("/presentation/") || /(^|\.)(?:canva\.com|prezi\.com)$/.test(url.hostname); } catch { return false; }
+}
+
+function presentationDownloadUrl(value: string): string {
+  const url = new URL(value);
+  const google = url.hostname === "docs.google.com" ? url.pathname.match(/\/presentation\/d\/([^/]+)/) : null;
+  if (google?.[1]) return `https://docs.google.com/presentation/d/${google[1]}/export/pdf`;
+  if (url.hostname === "github.com" && url.pathname.includes("/blob/")) {
+    url.hostname = "raw.githubusercontent.com";
+    url.pathname = url.pathname.replace("/blob/", "/");
+  }
+  return url.href;
 }
 
 async function collectYouTubeTranscript(context: BrowserContext, url: string, outputRoot: string, relativeDir: string, timeoutMs: number): Promise<ContentEvidence> {
@@ -231,12 +296,6 @@ async function extractTranscriptFromUi(page: import("playwright").Page): Promise
 
 function decodeXml(value: string): string {
   return value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;|&apos;/g, "'");
-}
-
-async function fetchJson(url: string, headers: Record<string, string>, timeoutMs: number): Promise<unknown> {
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
-  if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status} for ${url}`);
-  return response.json();
 }
 
 function youtubeId(value: string): string | null {

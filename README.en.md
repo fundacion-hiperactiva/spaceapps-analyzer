@@ -2,7 +2,9 @@
 
 `spaceapps-analyzer` is an evidence-first CLI for auditing a public [NASA Space Apps Challenge](https://www.spaceappschallenge.org/) local event.
 
-It discovers teams, captures relevant pages as PNG/HTML/text, checks project links in a fresh browser context, reads public GitHub/GitLab repositories and YouTube captions, compares the combined evidence with the selected challenge, and generates separate English and Spanish reports.
+For every team it checks whether the five official criteria—Impact, Creativity, Validity, Relevance, and Presentation—are documented in the NASA submission and locally collected artifacts. Results are `present`, `partial`, `not found`, or `insufficient evidence`; they are presence checks, not grades or evaluation scores. Each result retains source excerpts for human review.
+
+It discovers teams, captures relevant pages as PNG/HTML/text, checks project links in a fresh browser context, shallow-clones public GitHub/GitLab repositories, downloads public presentations, extracts YouTube captions, compares the combined evidence with the selected challenge, and generates separate English and Spanish reports.
 
 The tool never logs in, submits forms, bypasses access controls, or executes participant code. Automated findings support human review; they are not automatic judging or disqualification decisions.
 
@@ -12,6 +14,7 @@ The tool never logs in, submits forms, bypasses access controls, or executes par
 - pnpm 10 or newer
 - Chromium for Playwright
 - Optional: [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) as a second attempt at extracting public YouTube subtitle tracks
+- Optional: `pdftotext` (Poppler) to extract text from PDF presentations; the downloaded file is still retained when it is unavailable
 
 ## Installation
 
@@ -117,7 +120,7 @@ When working with Codex:
 --roster-url <url>        Public organizer roster with team statuses
 --supplemental-source     Additional public source; repeatable
 --no-external-checks      Skip public project-link checks
---no-content-extraction   Skip repository and video-caption extraction
+--no-content-extraction   Skip repository, presentation, and video-caption extraction
 --no-pdf                  Skip PDF rendering
 --headed                  Show Chromium while crawling
 --fail-on never|fail|warn CI exit policy (default: never)

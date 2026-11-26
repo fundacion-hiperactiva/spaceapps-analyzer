@@ -79,6 +79,10 @@ export async function extractProject(page: Page): Promise<ProjectEvidence> {
 
   const demoUrl = field("Project Demonstration")?.links[0] ?? null;
   const projectUrl = field("Project")?.links[0] ?? null;
+  const resourceUrls = [...new Set([
+    ...fields.flatMap((item) => item.links),
+    ...fields.flatMap((item) => extractHttpUrls(item.value)),
+  ])];
   const summary = cleanText(field("Summary")?.value || "");
   const details = cleanText(field("Project Details")?.value || "");
   const nasaData = cleanText(field("NASA Data")?.value || "");
@@ -91,8 +95,13 @@ export async function extractProject(page: Page): Promise<ProjectEvidence> {
     nasaData,
     demoUrl,
     projectUrl,
+    resourceUrls,
     submitted: Boolean(summary || details || demoUrl || projectUrl),
   };
+}
+
+export function extractHttpUrls(value: string): string[] {
+  return [...value.matchAll(/https?:\/\/[^\s<>"']+/gi)].map((match) => match[0].replace(/[),.;\]}]+$/g, ""));
 }
 
 export async function extractChallengeLink(page: Page, year: string, fallbackTitle = ""): Promise<{ title: string; url: string | null }> {
@@ -129,6 +138,6 @@ async function selectedPanel(page: Page) {
 }
 
 function emptyProject(): ProjectEvidence {
-  return { name: "", summary: "", details: "", nasaData: "", demoUrl: null, projectUrl: null, submitted: false };
+  return { name: "", summary: "", details: "", nasaData: "", demoUrl: null, projectUrl: null, resourceUrls: [], submitted: false };
 }
 

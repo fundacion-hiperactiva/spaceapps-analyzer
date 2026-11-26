@@ -134,8 +134,9 @@ export function translatedLimitations(locale: Locale, limitations: string[]): st
     "Las verificaciones automatizadas observan el comportamiento público de la web en el momento de la captura; la disponibilidad puede cambiar posteriormente.",
     "La detección de barreras de autenticación usa códigos de estado, redirecciones y patrones de texto visible, y puede producir falsos positivos o negativos.",
     "La cobertura del desafío es una señal NLP explicable que combina conceptos normalizados y similitud semántica. Una persona debe determinar el cumplimiento científico y funcional real.",
-    "El texto del repositorio se descarga para analizarlo, pero el código nunca se ejecuta. La evidencia de video depende de que el proveedor publique subtítulos.",
-    "El idioma de la página del proyecto se estima mediante palabras funcionales en inglés y español. El idioma de diapositivas enlazadas y del audio del video requiere revisión manual cuando no hay transcripción pública.",
+    "Los repositorios públicos se clonan con historial reducido y se indexan localmente, pero el código de los participantes nunca se ejecuta. Las presentaciones públicas se descargan cuando el proveedor permite exportarlas; la evidencia de video depende de subtítulos públicos.",
+    "Los cinco criterios de evaluación son verificaciones de presencia sobre evidencia textual registrada, no notas. Pueden omitir evidencia visual, oral, implícita o mal extraída y requieren revisión humana.",
+    "El idioma de la página del proyecto se estima mediante palabras funcionales en inglés y español. El idioma oral del video requiere revisión manual cuando no hay transcripción pública.",
     "El CLI no ejecuta código descargado, concede permisos, envía formularios ni evade controles de acceso.",
   ];
   return limitations.map((_, index) => translated[index] ?? limitations[index] ?? "");

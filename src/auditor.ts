@@ -8,7 +8,7 @@ import { eventIdentity, eventTeamListings, extractChallengeLink, extractMembers,
 import type { AuditOptions, CapturedPage, ChallengeEvidence, EventAudit, LinkCheck, RosterEvidence, TeamAudit } from "./types.js";
 import { cleanText, extractYearAndSlug, mapLimit, slugify, validatePublicHttpUrl } from "./utils.js";
 
-export const TOOL_VERSION = "0.3.0";
+export const TOOL_VERSION = "0.4.0";
 
 export async function auditEvent(inputUrl: string, options: AuditOptions): Promise<EventAudit> {
   const sourceUrl = validatePublicHttpUrl(inputUrl);
@@ -104,8 +104,9 @@ export async function auditEvent(inputUrl: string, options: AuditOptions): Promi
         "Automated checks observe public web behavior at capture time; later availability can change.",
         "Authentication-wall detection uses status codes, redirects, and visible text patterns and can produce false positives or negatives.",
         "Challenge coverage is an explainable NLP signal combining normalized concept coverage and semantic similarity. A human judge must decide true scientific and functional compliance.",
-        "Repository text is downloaded for analysis but code is never executed. Video evidence depends on captions being publicly exposed by the video provider.",
-        "Project-page language is estimated from English and Spanish function words. Linked slide language and spoken video language require manual review when no public transcript is available.",
+        "Public repositories are shallow-cloned and indexed locally, but participant code is never executed. Public presentations are downloaded when their provider exposes an export; video evidence depends on public captions.",
+        "The five evaluation criteria are presence checks over recorded text evidence, not grades. They can miss visual, spoken, implicit, or poorly extracted evidence and require human review.",
+        "Project-page language is estimated from English and Spanish function words. Spoken video language requires manual review when no public transcript is available.",
         "The CLI does not execute downloaded code, grant permissions, submit forms, or bypass access controls.",
       ],
     };
@@ -178,7 +179,7 @@ async function auditTeam(input: {
     }
 
     const contentEvidence = extractContent
-      ? await collectExternalContent({ context: linkContext, projectUrl: project.projectUrl, demoUrl: project.demoUrl, outputRoot: outputDir, relativeDir: `${base}/content`, timeoutMs })
+      ? await collectExternalContent({ context: linkContext, projectUrl: project.projectUrl, demoUrl: project.demoUrl, resourceUrls: project.resourceUrls, outputRoot: outputDir, relativeDir: `${base}/content`, timeoutMs })
       : [];
     const result = evaluateTeam({ project, challenge, links, contentEvidence });
     return {
@@ -195,6 +196,7 @@ async function auditTeam(input: {
       contentEvidence,
       projectLanguage: result.language,
       challengeCoverage: result.coverage,
+      evaluationCriteria: result.criteria,
       findings: result.findings,
       status: result.status,
     };
@@ -267,12 +269,13 @@ function failedTeam(listing: TeamListing, slug: string, pages: Record<string, Ca
     members: [],
     about: "",
     pages,
-    project: { name: "", summary: "", details: "", nasaData: "", demoUrl: null, projectUrl: null, submitted: false },
+    project: { name: "", summary: "", details: "", nasaData: "", demoUrl: null, projectUrl: null, resourceUrls: [], submitted: false },
     challenge: { title: listing.challenge, url: null, excerpt: "" },
     links: [],
     contentEvidence: [],
     projectLanguage: { status: "unknown", detected: "unknown", englishRatio: null, nonEnglishFields: [], explanation: "Team crawl failed" },
     challengeCoverage: { status: "unknown", ratio: null, matchedTerms: [], missingTerms: [], explanation: "Team crawl failed" },
+    evaluationCriteria: ["impact", "creativity", "validity", "relevance", "presentation"].map((key) => ({ key: key as "impact" | "creativity" | "validity" | "relevance" | "presentation", status: "unknown", explanation: "Team crawl failed", evidence: [] })),
     findings: [{ code: "TEAM_CRAWL_FAILED", severity: "error", status: "fail", message: error, evidence: [listing.url] }],
     status: "fail",
   };

@@ -1,4 +1,5 @@
 import type { AuditFinding, AuditStatus, ChallengeEvidence, ContentEvidence, LinkCheck, ProjectEvidence } from "./types.js";
+import { checkEvaluationCriteria } from "./criteria.js";
 
 const STOP_WORDS = new Set([
   "about", "after", "again", "also", "and", "are", "build", "challenge", "create", "data", "does", "enable", "for", "from",
@@ -47,6 +48,7 @@ export function evaluateTeam(input: {
   coverage: ReturnType<typeof challengeCoverage>;
   language: ReturnType<typeof projectLanguage>;
   status: AuditStatus;
+  criteria: ReturnType<typeof checkEvaluationCriteria>;
 } {
   const { project, challenge, links, contentEvidence = [] } = input;
   const findings: AuditFinding[] = [];
@@ -88,7 +90,7 @@ export function evaluateTeam(input: {
     });
   }
 
-  return { findings, coverage, language, status: overallStatus(findings) };
+  return { findings, coverage, language, criteria: checkEvaluationCriteria(project, challenge, contentEvidence), status: overallStatus(findings) };
 }
 
 export function projectLanguage(project: ProjectEvidence) {

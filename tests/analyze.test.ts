@@ -15,6 +15,7 @@ const project: ProjectEvidence = {
   nasaData: "Create Health Monitoring Software for Astronauts on Space Missions https://www.spaceappschallenge.org/2026/challenges/health-monitoring-software/",
   demoUrl: "https://example.com/demo",
   projectUrl: "https://example.com/project",
+  resourceUrls: ["https://example.com/demo", "https://example.com/project"],
   submitted: true,
 };
 
@@ -75,6 +76,20 @@ describe("evaluateTeam", () => {
     expect(result.findings.find((finding) => finding.code === "DEMO_LINK")?.status).toBe("fail");
     expect(result.findings.find((finding) => finding.code === "NASA_DATA")?.status).toBe("fail");
     expect(result.status).toBe("fail");
+  });
+
+  it("checks the five criteria as presence states without numeric grades", () => {
+    const documented = {
+      ...project,
+      summary: "Problem: astronauts face a health risk. Our innovative solution helps crews and improves wellbeing.",
+      details: "Method: a scientific model uses NASA data. We tested and validated the prototype for real-world usability. Results show a practical benefit.",
+    };
+    const result = evaluateTeam({ project: documented, challenge, links: [] });
+    expect(result.criteria.map((item) => item.key)).toEqual(["impact", "creativity", "validity", "relevance", "presentation"]);
+    expect(result.criteria.every((item) => ["pass", "warn", "fail", "unknown"].includes(item.status))).toBe(true);
+    expect(result.criteria.find((item) => item.key === "impact")?.status).toBe("pass");
+    expect(result.criteria.find((item) => item.key === "validity")?.evidence.length).toBeGreaterThan(0);
+    expect(result.criteria.some((item) => "score" in item)).toBe(false);
   });
 });
 

@@ -33,6 +33,7 @@ export interface ProjectEvidence {
   nasaData: string;
   demoUrl: string | null;
   projectUrl: string | null;
+  resourceUrls: string[];
   submitted: boolean;
 }
 
@@ -44,7 +45,7 @@ export interface ChallengeEvidence {
 }
 
 export interface ContentEvidence {
-  kind: "repository" | "video";
+  kind: "repository" | "video" | "presentation";
   sourceUrl: string;
   status: AuditStatus;
   title: string;
@@ -52,8 +53,18 @@ export interface ContentEvidence {
   reason: string;
   textPath?: string;
   metadataPath?: string;
+  artifactPath?: string;
   language?: string;
   items?: string[];
+}
+
+export type EvaluationCriterionKey = "impact" | "creativity" | "validity" | "relevance" | "presentation";
+
+export interface EvaluationCriterionCheck {
+  key: EvaluationCriterionKey;
+  status: AuditStatus;
+  explanation: string;
+  evidence: Array<{ source: string; excerpt: string }>;
 }
 
 export interface AuditFinding {
@@ -93,6 +104,7 @@ export interface TeamAudit {
     semanticSimilarity?: number;
     evidenceSources?: string[];
   };
+  evaluationCriteria: EvaluationCriterionCheck[];
   findings: AuditFinding[];
   status: AuditStatus;
 }

@@ -2,7 +2,9 @@
 
 `spaceapps-analyzer` es un CLI orientado a evidencia para auditar una sede pública del [NASA Space Apps Challenge](https://www.spaceappschallenge.org/).
 
-Descubre los equipos, captura las páginas relevantes como PNG/HTML/texto, verifica los enlaces en un contexto limpio de navegador, lee repositorios públicos de GitHub/GitLab y subtítulos de YouTube, compara la evidencia combinada con el desafío seleccionado y genera reportes separados en inglés y español.
+Descubre los equipos, captura las páginas relevantes como PNG/HTML/texto, verifica los enlaces en un contexto limpio de navegador, clona repositorios públicos de GitHub/GitLab, descarga presentaciones públicas, extrae subtítulos de YouTube y genera reportes separados en inglés y español.
+
+Para cada equipo verifica la presencia documentada de los cinco criterios oficiales —Impacto, Creatividad, Validez, Relevancia y Presentación— usando la entrega de NASA y el contenido local extraído. Los resultados son `presente`, `parcial`, `no encontrado` o `sin evidencia suficiente`: no son notas ni puntajes de evaluación. Cada estado incluye fragmentos y fuentes para revisión humana.
 
 La herramienta nunca inicia sesión, envía formularios, evade controles de acceso ni ejecuta el código de los participantes. Los hallazgos automatizados ayudan a una revisión humana; no son decisiones automáticas de evaluación o descalificación.
 
@@ -12,6 +14,7 @@ La herramienta nunca inicia sesión, envía formularios, evade controles de acce
 - pnpm 10 o superior
 - Chromium para Playwright
 - Opcional: [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) como segundo intento para obtener pistas públicas de subtítulos de YouTube
+- Opcional: `pdftotext` (Poppler) para extraer texto de presentaciones PDF; el archivo igualmente se conserva si no está instalado
 
 ## Instalación
 
@@ -117,7 +120,7 @@ Al trabajar con Codex:
 --roster-url <url>        Padrón público con estados de los equipos
 --supplemental-source     Fuente pública adicional; se puede repetir
 --no-external-checks      Omitir verificaciones de enlaces públicos
---no-content-extraction   Omitir repositorios y subtítulos de video
+--no-content-extraction   Omitir repositorios, presentaciones y subtítulos de video
 --no-pdf                  Omitir la generación de PDF
 --headed                  Mostrar Chromium durante la captura
 --fail-on never|fail|warn Política de salida para CI (predeterminado: never)
